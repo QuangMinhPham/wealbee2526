@@ -155,7 +155,7 @@ def run_label(new_ids: list[str]) -> int:
         from supabase_writer import get_client
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
-        client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+        client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'), max_retries=1, timeout=10.0)
         sb     = get_client()
 
         SYSTEM_PROMPT = """Bạn là chuyên gia phân tích tin tức tài chính Việt Nam.
@@ -184,6 +184,9 @@ Chỉ trả lời đúng một từ: positive / negative / neutral / trash"""
                 raw = resp.choices[0].message.content.strip().lower()
                 return article['id'], next((l for l in VALID_LABELS if l in raw), 'neutral')
             except Exception as e:
+                err = str(e)
+                if '429' in err or 'rate_limit' in err:
+                    raise  # bubble up để dừng toàn bộ label step
                 log.warning(f'  API lỗi {article["id"][:8]}: {e}')
                 return article['id'], 'neutral'
 
