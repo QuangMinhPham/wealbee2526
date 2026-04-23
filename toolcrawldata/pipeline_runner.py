@@ -2,8 +2,8 @@
 Wealbee Pipeline Runner — chạy toàn bộ luồng tự động.
 
 Luồng:
-  [1] Crawl tin tức → INSERT Supabase
-  [2] Gán nhãn bằng GPT-4o-mini → UPDATE label
+  [1] Crawl tin tức 24h gần nhất → INSERT Supabase (upsert, không trùng)
+  [2] Gán nhãn bằng GPT-4o-mini → chỉ label bài mới crawl + có symbol
   [3] Gửi email cho subscribers
 
 Chạy thủ công:
@@ -53,18 +53,38 @@ def step_header(step: int, title: str):
 
 # ── Bước 1: Crawl ──────────────────────────────────────────────────────────────
 
-def run_crawl() -> int:
-    """Crawl VnExpress + Vietstock, trả về tổng số bài mới."""
-    step_header(1, 'CRAWL TIN TỨC')
-    total = 0
+def run_crawl() -> list[str]:
+    """
+    Crawl VnExpress + Vietstock trong 24h gần nhất.
+    Upsert theo article_url → không trùng lặp.
+    Trả về list ID các bài mới được INSERT (chưa tồn tại trước đó).
+    """
+    step_header(1, 'CRAWL TIN TỨC (24h)')
+
+    from supabase_writer import get_client
+    sb = get_client()
+    since = (datetime.utcnow() - timedelta(hours=24)).isoformat()
+
+    # Lấy danh sách article_url đã có trong DB trước khi crawl
+    existing = set()
+    offset = 0
+    while True:
+        rows = sb.table('market_news').select('article_url').gte('created_at', since).range(offset, offset + 999).execute()
+        for r in (rows.data or []):
+            if r.get('article_url'):
+                existing.add(r['article_url'])
+        if len(rows.data or []) < 1000:
+            break
+        offset += 1000
+    log.info(f'  Đã có sẵn {len(existing)} bài trong 24h qua')
+
+    all_new_ids = []
 
     # VnExpress
     try:
         import importlib.util
-        spec = importlib.util.spec_from_file_location(
-            'vnexpress_scraper', CRAWLERS_DIR / 'vnexpress_scraper.py'
-        )
-        mod = importlib.util.module_from_spec(spec)
+        spec = importlib.util.spec_from_file_location('vnexpress_scraper', CRAWLERS_DIR / 'vnexpress_scraper.py')
+        mod  = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
 
         mod.START_DATE = date.today() - timedelta(days=1)
@@ -74,21 +94,25 @@ def run_crawl() -> int:
         articles = mod.scrape_article_list()
         if articles:
             articles = mod.enrich_content(articles)
-            mod.upsert_to_supabase(articles)
-            log.info(f'✓ VnExpress: {len(articles)} bài')
-            total += len(articles)
+            # Lọc bài chưa có trong DB
+            new_articles = [a for a in articles if a.get('article_url') not in existing]
+            if new_articles:
+                mod.upsert_to_supabase(new_articles)
+                # Lấy ID các bài vừa upsert
+                urls = [a['article_url'] for a in new_articles if a.get('article_url')]
+                rows = sb.table('market_news').select('id,article_url').in_('article_url', urls[:500]).execute()
+                all_new_ids += [r['id'] for r in (rows.data or [])]
+            log.info(f'  VnExpress: {len(articles)} crawl, {len(new_articles)} bài mới')
         else:
-            log.warning('⚠ VnExpress: không có bài nào')
+            log.warning('  VnExpress: không có bài nào')
     except Exception as e:
-        log.error(f'✗ VnExpress lỗi: {e}')
+        log.error(f'  VnExpress lỗi: {e}')
 
     # Vietstock
     try:
         import importlib.util
-        spec = importlib.util.spec_from_file_location(
-            'vietstock_scraper', CRAWLERS_DIR / 'vietstock_scraper.py'
-        )
-        mod = importlib.util.module_from_spec(spec)
+        spec = importlib.util.spec_from_file_location('vietstock_scraper', CRAWLERS_DIR / 'vietstock_scraper.py')
+        mod  = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
 
         mod.START_DATE = date.today() - timedelta(days=1)
@@ -96,23 +120,34 @@ def run_crawl() -> int:
         articles = mod.scrape_article_list()
         if articles:
             articles = mod.enrich_content(articles)
-            mod.upsert_news_to_supabase(articles)
-            log.info(f'✓ Vietstock: {len(articles)} bài')
-            total += len(articles)
+            new_articles = [a for a in articles if a.get('article_url') not in existing]
+            if new_articles:
+                mod.upsert_news_to_supabase(new_articles)
+                urls = [a['article_url'] for a in new_articles if a.get('article_url')]
+                rows = sb.table('market_news').select('id,article_url').in_('article_url', urls[:500]).execute()
+                all_new_ids += [r['id'] for r in (rows.data or [])]
+            log.info(f'  Vietstock: {len(articles)} crawl, {len(new_articles)} bài mới')
         else:
-            log.warning('⚠ Vietstock: không có bài nào')
+            log.warning('  Vietstock: không có bài nào')
     except Exception as e:
-        log.error(f'✗ Vietstock lỗi: {e}')
+        log.error(f'  Vietstock lỗi: {e}')
 
-    log.info(f'→ Tổng crawl: {total} bài')
-    return total
+    log.info(f'  Tổng bài mới: {len(all_new_ids)}')
+    return all_new_ids
 
 
 # ── Bước 2: Label ──────────────────────────────────────────────────────────────
 
-def run_label() -> int:
-    """Gán nhãn tất cả bài chưa có label, trả về số bài đã label."""
+def run_label(new_ids: list[str]) -> int:
+    """
+    Gán nhãn chỉ những bài mới crawl, có symbol, chưa có label.
+    Trả về số bài đã label.
+    """
     step_header(2, 'GÁN NHÃN GPT-4o-mini')
+
+    if not new_ids:
+        log.info('  Không có bài mới → bỏ qua label')
+        return 0
 
     try:
         import os
@@ -120,8 +155,7 @@ def run_label() -> int:
         from supabase_writer import get_client
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
-        OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
-        client = OpenAI(api_key=OPENAI_API_KEY)
+        client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
         sb     = get_client()
 
         SYSTEM_PROMPT = """Bạn là chuyên gia phân tích tin tức tài chính Việt Nam.
@@ -154,21 +188,22 @@ Chỉ trả lời đúng một từ: positive / negative / neutral / trash"""
                 return article['id'], 'neutral'
 
         total_labeled = 0
-        batch_size = 50
-        since = (date.today() - timedelta(days=1)).isoformat()
+        batch_size    = 50
 
-        while True:
+        # Chỉ lấy bài trong new_ids, có symbol, chưa label
+        for i in range(0, len(new_ids), batch_size):
+            chunk_ids = new_ids[i:i + batch_size]
             result = (
                 sb.table('market_news')
                 .select('id,title,content')
+                .in_('id', chunk_ids)
                 .is_('label', 'null')
-                .gte('published_at', since)
-                .limit(batch_size)
+                .not_.is_('symbol', 'null')
                 .execute()
             )
             articles = result.data or []
             if not articles:
-                break
+                continue
 
             log.info(f'  Đang label {len(articles)} bài...')
             with ThreadPoolExecutor(max_workers=5) as executor:
@@ -182,11 +217,11 @@ Chỉ trả lời đúng một từ: positive / negative / neutral / trash"""
                     }).eq('id', rec_id).execute()
                     total_labeled += 1
 
-        log.info(f'→ Đã label: {total_labeled} bài')
+        log.info(f'  Đã label: {total_labeled} bài')
         return total_labeled
 
     except Exception as e:
-        log.error(f'✗ Label lỗi: {e}')
+        log.error(f'  Label lỗi: {e}')
         return 0
 
 
@@ -195,12 +230,11 @@ Chỉ trả lời đúng một từ: positive / negative / neutral / trash"""
 def run_email():
     """Gửi email cho tất cả subscribers."""
     step_header(3, 'GỬI EMAIL THÔNG BÁO')
-
     try:
         from email_notifier import run
         run()
     except Exception as e:
-        log.error(f'✗ Email lỗi: {e}')
+        log.error(f'  Email lỗi: {e}')
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────
@@ -212,21 +246,21 @@ def main():
     log.info(f'  WEALBEE PIPELINE — {datetime.now().strftime("%d/%m/%Y %H:%M:%S")}')
     log.info('=' * 55)
 
-    n_crawl = run_crawl()
+    new_ids = run_crawl()
     time.sleep(2)
 
-    n_label = run_label()
+    n_label = run_label(new_ids)
     time.sleep(2)
 
     if n_label > 0:
         run_email()
     else:
-        log.info('  Không có bài mới → bỏ qua gửi email')
+        log.info('  Không có bài mới có nhãn → bỏ qua gửi email')
 
     elapsed = time.time() - start
     log.info('=' * 55)
     log.info(f'  HOÀN THÀNH — {elapsed:.0f}s')
-    log.info(f'  Crawl: {n_crawl} bài | Label: {n_label} bài')
+    log.info(f'  Crawl mới: {len(new_ids)} bài | Label: {n_label} bài')
     log.info('=' * 55)
 
 
