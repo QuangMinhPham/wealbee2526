@@ -53,38 +53,14 @@ def step_header(step: int, title: str):
 
 # ── Bước 1: Crawl ──────────────────────────────────────────────────────────────
 
-def run_crawl() -> list[str]:
+def run_crawl() -> int:
     """
     Crawl VnExpress + Vietstock trong 24h gần nhất.
     Upsert theo article_url → không trùng lặp.
-    Trả về list ID các bài mới được INSERT (chưa tồn tại trước đó).
+    Trả về tổng số bài đã crawl.
     """
     step_header(1, 'CRAWL TIN TỨC (24h)')
-
-    from supabase_writer import get_client
-    sb = get_client()
-    since = (datetime.utcnow() - timedelta(hours=24)).isoformat()
-
-    # Lấy danh sách article_url đã có trong DB trước khi crawl
-    existing = set()
-    offset = 0
-    while True:
-        rows = sb.table('market_news').select('article_url').gte('created_at', since).range(offset, offset + 999).execute()
-        for r in (rows.data or []):
-            if r.get('article_url'):
-                existing.add(r['article_url'])
-        if len(rows.data or []) < 1000:
-            break
-        offset += 1000
-    log.info(f'  Da co san {len(existing)} bai trong 24h qua')
-
-    crawl_start = datetime.utcnow().isoformat()
-    all_new_ids = []
-
-    def fetch_new_ids_since(ts: str) -> list[str]:
-        """Lấy ID các bài được INSERT sau thời điểm ts."""
-        result = sb.table('market_news').select('id').gte('created_at', ts).not_.is_('symbol', 'null').execute()
-        return [r['id'] for r in (result.data or [])]
+    total = 0
 
     # VnExpress
     try:
@@ -100,12 +76,9 @@ def run_crawl() -> list[str]:
         articles = mod.scrape_article_list()
         if articles:
             articles = mod.enrich_content(articles)
-            new_articles = [a for a in articles if a.get('article_url') not in existing]
-            if new_articles:
-                t0 = datetime.utcnow().isoformat()
-                mod.upsert_to_supabase(new_articles)
-                all_new_ids += fetch_new_ids_since(t0)
-            log.info(f'  VnExpress: {len(articles)} crawl, {len(new_articles)} bai moi')
+            mod.upsert_to_supabase(articles)
+            log.info(f'  VnExpress: {len(articles)} bai')
+            total += len(articles)
         else:
             log.warning('  VnExpress: khong co bai nao')
     except Exception as e:
@@ -123,35 +96,26 @@ def run_crawl() -> list[str]:
         articles = mod.scrape_article_list()
         if articles:
             articles = mod.enrich_content(articles)
-            new_articles = [a for a in articles if a.get('article_url') not in existing]
-            if new_articles:
-                t0 = datetime.utcnow().isoformat()
-                mod.upsert_news_to_supabase(new_articles)
-                all_new_ids += fetch_new_ids_since(t0)
-            log.info(f'  Vietstock: {len(articles)} crawl, {len(new_articles)} bai moi')
+            mod.upsert_news_to_supabase(articles)
+            log.info(f'  Vietstock: {len(articles)} bai')
+            total += len(articles)
         else:
             log.warning('  Vietstock: khong co bai nao')
     except Exception as e:
         log.error(f'  Vietstock loi: {e}')
 
-    # Deduplicate
-    all_new_ids = list(set(all_new_ids))
-    log.info(f'  Tong bai moi co symbol: {len(all_new_ids)}')
-    return all_new_ids
+    log.info(f'  Tong crawl: {total} bai')
+    return total
 
 
 # ── Bước 2: Label ──────────────────────────────────────────────────────────────
 
-def run_label(new_ids: list[str]) -> int:
+def run_label() -> int:
     """
-    Gán nhãn chỉ những bài mới crawl, có symbol, chưa có label.
+    Gán nhãn các bài trong 24h có symbol, chưa có label.
     Trả về số bài đã label.
     """
     step_header(2, 'GÁN NHÃN GPT-4o-mini')
-
-    if not new_ids:
-        log.info('  Không có bài mới → bỏ qua label')
-        return 0
 
     try:
         import os
@@ -190,27 +154,27 @@ Chỉ trả lời đúng một từ: positive / negative / neutral / trash"""
             except Exception as e:
                 err = str(e)
                 if '429' in err or 'rate_limit' in err:
-                    raise  # bubble up để dừng toàn bộ label step
+                    raise
                 log.warning(f'  API lỗi {article["id"][:8]}: {e}')
                 return article['id'], 'neutral'
 
         total_labeled = 0
         batch_size    = 50
+        since = (datetime.utcnow() - timedelta(hours=24)).isoformat()
 
-        # Chỉ lấy bài trong new_ids, có symbol, chưa label
-        for i in range(0, len(new_ids), batch_size):
-            chunk_ids = new_ids[i:i + batch_size]
+        while True:
             result = (
                 sb.table('market_news')
                 .select('id,title,content')
-                .in_('id', chunk_ids)
                 .is_('label', 'null')
                 .not_.is_('symbol', 'null')
+                .gte('published_at', since)
+                .limit(batch_size)
                 .execute()
             )
             articles = result.data or []
             if not articles:
-                continue
+                break
 
             log.info(f'  Đang label {len(articles)} bài...')
             with ThreadPoolExecutor(max_workers=5) as executor:
@@ -253,10 +217,10 @@ def main():
     log.info(f'  WEALBEE PIPELINE — {datetime.now().strftime("%d/%m/%Y %H:%M:%S")}')
     log.info('=' * 55)
 
-    new_ids = run_crawl()
+    n_crawl = run_crawl()
     time.sleep(2)
 
-    n_label = run_label(new_ids)
+    n_label = run_label()
     time.sleep(2)
 
     if n_label > 0:
@@ -267,7 +231,7 @@ def main():
     elapsed = time.time() - start
     log.info('=' * 55)
     log.info(f'  HOÀN THÀNH — {elapsed:.0f}s')
-    log.info(f'  Crawl mới: {len(new_ids)} bài | Label: {n_label} bài')
+    log.info(f'  Crawl mới: {n_crawl} bài | Label: {n_label} bài')
     log.info('=' * 55)
 
 
