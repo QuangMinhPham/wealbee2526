@@ -76,9 +76,15 @@ def run_crawl() -> list[str]:
         if len(rows.data or []) < 1000:
             break
         offset += 1000
-    log.info(f'  Đã có sẵn {len(existing)} bài trong 24h qua')
+    log.info(f'  Da co san {len(existing)} bai trong 24h qua')
 
+    crawl_start = datetime.utcnow().isoformat()
     all_new_ids = []
+
+    def fetch_new_ids_since(ts: str) -> list[str]:
+        """Lấy ID các bài được INSERT sau thời điểm ts."""
+        result = sb.table('market_news').select('id').gte('created_at', ts).not_.is_('symbol', 'null').execute()
+        return [r['id'] for r in (result.data or [])]
 
     # VnExpress
     try:
@@ -94,19 +100,16 @@ def run_crawl() -> list[str]:
         articles = mod.scrape_article_list()
         if articles:
             articles = mod.enrich_content(articles)
-            # Lọc bài chưa có trong DB
             new_articles = [a for a in articles if a.get('article_url') not in existing]
             if new_articles:
+                t0 = datetime.utcnow().isoformat()
                 mod.upsert_to_supabase(new_articles)
-                # Lấy ID các bài vừa upsert
-                urls = [a['article_url'] for a in new_articles if a.get('article_url')]
-                rows = sb.table('market_news').select('id,article_url').in_('article_url', urls[:500]).execute()
-                all_new_ids += [r['id'] for r in (rows.data or [])]
-            log.info(f'  VnExpress: {len(articles)} crawl, {len(new_articles)} bài mới')
+                all_new_ids += fetch_new_ids_since(t0)
+            log.info(f'  VnExpress: {len(articles)} crawl, {len(new_articles)} bai moi')
         else:
-            log.warning('  VnExpress: không có bài nào')
+            log.warning('  VnExpress: khong co bai nao')
     except Exception as e:
-        log.error(f'  VnExpress lỗi: {e}')
+        log.error(f'  VnExpress loi: {e}')
 
     # Vietstock
     try:
@@ -122,17 +125,18 @@ def run_crawl() -> list[str]:
             articles = mod.enrich_content(articles)
             new_articles = [a for a in articles if a.get('article_url') not in existing]
             if new_articles:
+                t0 = datetime.utcnow().isoformat()
                 mod.upsert_news_to_supabase(new_articles)
-                urls = [a['article_url'] for a in new_articles if a.get('article_url')]
-                rows = sb.table('market_news').select('id,article_url').in_('article_url', urls[:500]).execute()
-                all_new_ids += [r['id'] for r in (rows.data or [])]
-            log.info(f'  Vietstock: {len(articles)} crawl, {len(new_articles)} bài mới')
+                all_new_ids += fetch_new_ids_since(t0)
+            log.info(f'  Vietstock: {len(articles)} crawl, {len(new_articles)} bai moi')
         else:
-            log.warning('  Vietstock: không có bài nào')
+            log.warning('  Vietstock: khong co bai nao')
     except Exception as e:
-        log.error(f'  Vietstock lỗi: {e}')
+        log.error(f'  Vietstock loi: {e}')
 
-    log.info(f'  Tổng bài mới: {len(all_new_ids)}')
+    # Deduplicate
+    all_new_ids = list(set(all_new_ids))
+    log.info(f'  Tong bai moi co symbol: {len(all_new_ids)}')
     return all_new_ids
 
 
