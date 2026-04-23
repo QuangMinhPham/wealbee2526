@@ -155,12 +155,14 @@ Chỉ trả lời đúng một từ: positive / negative / neutral / trash"""
 
         total_labeled = 0
         batch_size = 50
+        since = (date.today() - timedelta(days=1)).isoformat()
 
         while True:
             result = (
                 sb.table('market_news')
                 .select('id,title,content')
                 .is_('label', 'null')
+                .gte('published_at', since)
                 .limit(batch_size)
                 .execute()
             )
