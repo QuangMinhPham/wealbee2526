@@ -187,7 +187,7 @@ Chỉ trả lời đúng một từ: positive / negative / neutral / trash"""
             text = f"Tiêu đề: {article.get('title','')}\nNội dung: {(article.get('content') or '')[:1500]}"
             try:
                 resp = client.chat.completions.create(
-                    model='gpt-4o-mini',
+                    model='gpt-4.1-mini',
                     messages=[
                         {'role': 'system', 'content': SYSTEM_PROMPT},
                         {'role': 'user',   'content': text},
