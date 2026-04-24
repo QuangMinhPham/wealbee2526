@@ -53,14 +53,32 @@ def step_header(step: int, title: str):
 
 # ── Bước 1: Crawl ──────────────────────────────────────────────────────────────
 
-def run_crawl() -> int:
+def run_crawl() -> list[str]:
     """
     Crawl VnExpress + Vietstock trong 24h gần nhất.
     Upsert theo article_url → không trùng lặp.
-    Trả về tổng số bài đã crawl.
+    Trả về list ID các bài vừa được INSERT mới (không phải update).
     """
     step_header(1, 'CRAWL TIN TỨC (24h)')
-    total = 0
+
+    from supabase_writer import get_client
+    sb = get_client()
+
+    # Lấy set article_url đã tồn tại TRƯỚC khi crawl
+    since = (datetime.utcnow() - timedelta(hours=24)).isoformat()
+    existing_urls = set()
+    offset = 0
+    while True:
+        rows = sb.table('market_news').select('article_url').gte('published_at', since).range(offset, offset + 999).execute()
+        for r in (rows.data or []):
+            if r.get('article_url'):
+                existing_urls.add(r['article_url'])
+        if len(rows.data or []) < 1000:
+            break
+        offset += 1000
+    log.info(f'  Da co {len(existing_urls)} bai trong 24h qua')
+
+    all_new_urls = []
 
     # VnExpress
     try:
@@ -76,9 +94,10 @@ def run_crawl() -> int:
         articles = mod.scrape_article_list()
         if articles:
             articles = mod.enrich_content(articles)
+            new_articles = [a for a in articles if a.get('article_url') and a['article_url'] not in existing_urls]
             mod.upsert_to_supabase(articles)
-            log.info(f'  VnExpress: {len(articles)} bai')
-            total += len(articles)
+            all_new_urls += [a['article_url'] for a in new_articles if a.get('article_url')]
+            log.info(f'  VnExpress: {len(articles)} crawl, {len(new_articles)} bai INSERT moi')
         else:
             log.warning('  VnExpress: khong co bai nao')
     except Exception as e:
@@ -96,26 +115,32 @@ def run_crawl() -> int:
         articles = mod.scrape_article_list()
         if articles:
             articles = mod.enrich_content(articles)
+            new_articles = [a for a in articles if a.get('article_url') and a['article_url'] not in existing_urls]
             mod.upsert_news_to_supabase(articles)
-            log.info(f'  Vietstock: {len(articles)} bai')
-            total += len(articles)
+            all_new_urls += [a.get('article_url') or a.get('Link bài viết') for a in new_articles]
+            log.info(f'  Vietstock: {len(articles)} crawl, {len(new_articles)} bai INSERT moi')
         else:
             log.warning('  Vietstock: khong co bai nao')
     except Exception as e:
         log.error(f'  Vietstock loi: {e}')
 
-    log.info(f'  Tong crawl: {total} bai')
-    return total
+    all_new_urls = [u for u in all_new_urls if u]
+    log.info(f'  Tong bai INSERT moi: {len(all_new_urls)}')
+    return all_new_urls
 
 
 # ── Bước 2: Label ──────────────────────────────────────────────────────────────
 
-def run_label() -> int:
+def run_label(new_urls: list[str]) -> int:
     """
-    Gán nhãn các bài trong 24h có symbol, chưa có label.
+    Gán nhãn chỉ những bài vừa INSERT mới (theo URL), có symbol, chưa có label.
     Trả về số bài đã label.
     """
     step_header(2, 'GÁN NHÃN GPT-4o-mini')
+
+    if not new_urls:
+        log.info('  Khong co bai INSERT moi → bo qua label')
+        return 0
 
     try:
         import os
@@ -125,6 +150,27 @@ def run_label() -> int:
 
         client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'), max_retries=1, timeout=10.0)
         sb     = get_client()
+
+        # Lấy ID của các bài mới INSERT theo URL, có symbol, chưa label
+        # Query theo batch 50 URL để tránh URL quá dài
+        new_ids = []
+        batch_size_url = 50
+        for i in range(0, len(new_urls), batch_size_url):
+            chunk = new_urls[i:i + batch_size_url]
+            result = (
+                sb.table('market_news')
+                .select('id')
+                .in_('article_url', chunk)
+                .is_('label', 'null')
+                .not_.is_('symbol', 'null')
+                .execute()
+            )
+            new_ids += [r['id'] for r in (result.data or [])]
+
+        log.info(f'  Bai moi co symbol chua label: {len(new_ids)}')
+        if not new_ids:
+            log.info('  Khong co bai nao can label')
+            return 0
 
         SYSTEM_PROMPT = """Bạn là chuyên gia phân tích tin tức tài chính Việt Nam.
 Phân loại bài báo theo đúng một trong 4 nhãn:
@@ -155,28 +201,25 @@ Chỉ trả lời đúng một từ: positive / negative / neutral / trash"""
                 err = str(e)
                 if '429' in err or 'rate_limit' in err:
                     raise
-                log.warning(f'  API lỗi {article["id"][:8]}: {e}')
+                log.warning(f'  API loi {article["id"][:8]}: {e}')
                 return article['id'], 'neutral'
 
         total_labeled = 0
-        batch_size    = 50
-        since = (datetime.utcnow() - timedelta(hours=24)).isoformat()
+        batch_size = 50
 
-        while True:
+        for i in range(0, len(new_ids), batch_size):
+            chunk_ids = new_ids[i:i + batch_size]
             result = (
                 sb.table('market_news')
                 .select('id,title,content')
-                .is_('label', 'null')
-                .not_.is_('symbol', 'null')
-                .gte('published_at', since)
-                .limit(batch_size)
+                .in_('id', chunk_ids)
                 .execute()
             )
             articles = result.data or []
             if not articles:
-                break
+                continue
 
-            log.info(f'  Đang label {len(articles)} bài...')
+            log.info(f'  Dang label {len(articles)} bai...')
             with ThreadPoolExecutor(max_workers=5) as executor:
                 futures = {executor.submit(label_one, a): a for a in articles}
                 for future in as_completed(futures):
@@ -188,11 +231,11 @@ Chỉ trả lời đúng một từ: positive / negative / neutral / trash"""
                     }).eq('id', rec_id).execute()
                     total_labeled += 1
 
-        log.info(f'  Đã label: {total_labeled} bài')
+        log.info(f'  Da label: {total_labeled} bai')
         return total_labeled
 
     except Exception as e:
-        log.error(f'  Label lỗi: {e}')
+        log.error(f'  Label loi: {e}')
         return 0
 
 
@@ -217,21 +260,21 @@ def main():
     log.info(f'  WEALBEE PIPELINE — {datetime.now().strftime("%d/%m/%Y %H:%M:%S")}')
     log.info('=' * 55)
 
-    n_crawl = run_crawl()
+    new_urls = run_crawl()
     time.sleep(2)
 
-    n_label = run_label()
+    n_label = run_label(new_urls)
     time.sleep(2)
 
     if n_label > 0:
         run_email()
     else:
-        log.info('  Không có bài mới có nhãn → bỏ qua gửi email')
+        log.info('  Khong co bai moi co nhan → bo qua gui email')
 
     elapsed = time.time() - start
     log.info('=' * 55)
-    log.info(f'  HOÀN THÀNH — {elapsed:.0f}s')
-    log.info(f'  Crawl mới: {n_crawl} bài | Label: {n_label} bài')
+    log.info(f'  HOAN THANH — {elapsed:.0f}s')
+    log.info(f'  Crawl moi: {len(new_urls)} bai | Label: {n_label} bai')
     log.info('=' * 55)
 
 
