@@ -115,10 +115,12 @@ def _news_item_html(news: dict, symbol: str, quantity: int) -> str:
 
 
 def build_email_html(email: str, holdings: list[dict], news_by_symbol: dict) -> str:
-    today_str  = date.today().strftime('%d/%m/%Y')
-    now_str    = datetime.now().strftime('%H:%M')
+    from zoneinfo import ZoneInfo
+    vn_now     = datetime.now(ZoneInfo('Asia/Ho_Chi_Minh'))
+    today_str  = vn_now.strftime('%d/%m/%Y')
+    now_str    = vn_now.strftime('%H:%M')
     weekday_vi = ['Thu Hai','Thu Ba','Thu Tu','Thu Nam','Thu Sau','Thu Bay','Chu Nhat']
-    weekday    = weekday_vi[date.today().weekday()]
+    weekday    = weekday_vi[vn_now.weekday()]
 
     holding_blocks = ''
     for holding in holdings:
