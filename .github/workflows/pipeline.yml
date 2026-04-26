@@ -24,6 +24,17 @@ jobs:
       - name: Install dependencies
         run: pip install -r toolcrawldata/requirements.txt
 
+      - name: Validate secrets
+        run: |
+          [ -z "${{ secrets.SUPABASE_URL }}" ]         && echo "::error::SUPABASE_URL missing"         && exit 1 || true
+          [ -z "${{ secrets.SUPABASE_SERVICE_KEY }}" ] && echo "::error::SUPABASE_SERVICE_KEY missing" && exit 1 || true
+          [ -z "${{ secrets.OPENAI_API_KEY }}" ]       && echo "::error::OPENAI_API_KEY missing"       && exit 1 || true
+
+      - name: Dependency security audit
+        run: |
+          pip install safety
+          safety check -r toolcrawldata/requirements.txt --output text || echo "::warning::Vulnerable dependencies found — review before next release"
+
       - name: Run pipeline
         env:
           SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
@@ -31,6 +42,8 @@ jobs:
           OPENAI_API_KEY:       ${{ secrets.OPENAI_API_KEY }}
           RESEND_API_KEY:       ${{ secrets.RESEND_API_KEY }}
           EMAIL_FROM:           ${{ secrets.EMAIL_FROM }}
+          TELEGRAM_BOT_TOKEN:   ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:     ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           cd toolcrawldata
           python pipeline_runner.py

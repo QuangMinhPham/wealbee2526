@@ -17,6 +17,7 @@ import argparse
 from pathlib import Path
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from collections import Counter
 
 if sys.stdout.encoding != 'utf-8':
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -26,6 +27,7 @@ load_dotenv(Path(__file__).parent / '.env')
 
 sys.path.insert(0, str(Path(__file__).parent))
 from supabase_writer import get_client
+from monitor import monitor
 
 from openai import OpenAI
 
@@ -68,9 +70,13 @@ log = logging.getLogger('ai_labeler')
 
 def label_one(client: OpenAI, article: dict) -> tuple[str, str]:
     """Gọi GPT-4o-mini để gán nhãn 1 bài. Trả về (id, label)."""
-    title   = article.get('title', '')
+    title   = article.get('title', '') or ''
     content = article.get('content') or ''
-    text    = f"Tiêu đề: {title}\nNội dung: {content[:1500]}"
+
+    # Guardrail: giới hạn input gửi lên AI, chỉ giữ text thuần
+    title   = title[:300].strip()
+    content = content[:1500].strip()
+    text    = f"Tiêu đề: {title}\nNội dung: {content}"
 
     try:
         resp = client.chat.completions.create(
@@ -83,7 +89,10 @@ def label_one(client: OpenAI, article: dict) -> tuple[str, str]:
             temperature=0,
         )
         raw = resp.choices[0].message.content.strip().lower()
-        label = next((l for l in VALID_LABELS if l in raw), 'neutral')
+        # Guardrail: chỉ chấp nhận đúng label trong whitelist
+        label = raw if raw in VALID_LABELS else 'neutral'
+        if raw not in VALID_LABELS:
+            log.warning(f'  Label không hợp lệ từ AI: "{raw}" → neutral')
     except Exception as e:
         log.warning(f'  API lỗi cho {article["id"][:8]}: {e}')
         label = 'neutral'
@@ -120,6 +129,7 @@ def update_label(sb, rec_id: str, label: str, dry_run: bool = False):
 def process_batch(sb, client: OpenAI, articles: list[dict], dry_run: bool) -> tuple[int, int]:
     """Xử lý 1 batch bài, trả về (ok, fail)."""
     ok = fail = 0
+    batch_labels: list[str] = []
 
     with ThreadPoolExecutor(max_workers=WORKERS) as executor:
         futures = {executor.submit(label_one, client, a): a for a in articles}
@@ -127,11 +137,17 @@ def process_batch(sb, client: OpenAI, articles: list[dict], dry_run: bool) -> tu
             try:
                 rec_id, label = future.result()
                 update_label(sb, rec_id, label, dry_run)
+                batch_labels.append(label)
                 ok += 1
                 log.info(f'  ✓ {rec_id[:8]}... → {label}')
             except Exception as e:
                 fail += 1
+                monitor.metrics['errors'] += 1
                 log.warning(f'  ✗ Lỗi: {e}')
+
+    # Anomaly detection sau mỗi batch
+    monitor.check_sentiment_anomaly(batch_labels, window_label=f'batch {len(articles)} bài')
+    monitor.metrics['labeled'] += ok
 
     return ok, fail
 

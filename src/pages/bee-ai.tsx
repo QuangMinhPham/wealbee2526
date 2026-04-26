@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, Sparkles, TrendingUp, AlertCircle, Target, BarChart3, MessageSquare, Trash2, LogIn } from 'lucide-react';
-import { useSearchParams } from 'react-router';
-import { projectId, publicAnonKey } from '../utils/supabase/info';
+import { useSearchParams, useNavigate } from 'react-router';
+import { projectId } from '../utils/supabase/info';
 import { useAuth } from '../lib/auth-context';
 import { supabase } from '../lib/supabase/client';
+import { validatePromptParam, validateChatMessage } from '../lib/validation';
 
 interface Message {
   id: string;
@@ -21,6 +22,7 @@ interface ChatSession {
 
 export function PiAI() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -31,14 +33,11 @@ export function PiAI() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // Pre-fill input from notification ?prompt= param
   useEffect(() => {
-    const prompt = searchParams.get('prompt');
-    if (prompt) {
-      setInput(decodeURIComponent(prompt));
-      // Clear the param from URL without navigation
+    const safe = validatePromptParam(searchParams.get('prompt'));
+    if (safe) {
+      setInput(safe);
       setSearchParams({}, { replace: true });
-      // Focus the textarea after a short delay
       setTimeout(() => inputRef.current?.focus(), 100);
     }
   }, []);
@@ -81,9 +80,13 @@ export function PiAI() {
     }
   }, [user]);
 
-  const getAccessToken = async (): Promise<string> => {
+  const getAccessToken = async (): Promise<string | null> => {
     const { data: { session } } = await supabase.auth.getSession();
-    return session?.access_token ?? publicAnonKey;
+    if (!session?.access_token) {
+      navigate('/login');
+      return null;
+    }
+    return session.access_token;
   };
 
   const loadConversations = async () => {
@@ -163,8 +166,15 @@ export function PiAI() {
   };
 
   const sendMessage = async (messageText?: string) => {
-    const textToSend = messageText || input.trim();
-    if (!textToSend || isLoading) return;
+    const raw = messageText || input.trim();
+    if (!raw || isLoading) return;
+
+    let textToSend: string;
+    try {
+      textToSend = validateChatMessage(raw);
+    } catch {
+      return;
+    }
 
     const token = await getAccessToken();
     if (!token) return;
