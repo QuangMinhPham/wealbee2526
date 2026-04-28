@@ -74,82 +74,56 @@ def parse_ms_timestamp(ts: str) -> datetime | None:
         return None
 
 
-def fetch_channel(channel_id: int, channel_slug: str, max_api_pages: int = 3) -> list[dict]:
+def fetch_channel(channel_id: int, channel_slug: str, max_pages: int = 4) -> list[dict]:
+    """Dùng API hoàn toàn — pid=0 lấy bài mới nhất, sau đó paginate bằng pid nhỏ nhất."""
     articles = []
     seen_urls = set()
-    last_pid = None
+    last_pid = 0  # pid=0 = lấy bài mới nhất
 
-    # --- Trang 1: parse HTML ---
-    url = f'{BASE_URL}/{channel_slug}'
-    try:
-        r = requests.get(url, headers=HEADERS_HTML, timeout=12)
-        if r.status_code == 200:
-            soup = BeautifulSoup(r.text, 'html.parser')
-            items = soup.select('.onecms__loading li[pid]')
-            for li in items:
-                pid = li.get('pid', '')
-                a_tag = li.select_one('a[href]')
-                if not a_tag:
-                    continue
-                href = a_tag.get('href', '')
-                if not href.startswith('http'):
-                    href = BASE_URL + href
-                title = li.select_one('h3, h2, .title')
-                title = title.get_text(strip=True) if title else a_tag.get_text(strip=True)
-                if href and href not in seen_urls:
-                    seen_urls.add(href)
-                    articles.append({'title': title, 'article_url': href, '_pid': pid, 'published_at': None, '_headline': ''})
-                    if pid:
-                        last_pid = pid
-        else:
-            log.warning(f'  nguoiquansat trang 1 HTTP {r.status_code}')
-    except Exception as e:
-        log.warning(f'  nguoiquansat trang 1 lỗi: {e}')
-
-    # --- Trang 2+: dùng API ---
-    if last_pid:
-        for _ in range(max_api_pages):
-            api_url = f'{BASE_URL}/api/getMoreArticle/channel_empty_{last_pid}_{channel_id}_0'
-            try:
-                r2 = requests.get(api_url, headers=HEADERS_API, timeout=10)
-                if r2.status_code != 200:
-                    break
-                data = r2.json()
-                if not data:
-                    break
-
-                stop = False
-                new_pids = []
-                for item in data:
-                    pid = str(item.get('PublisherId', ''))
-                    pub_dt = parse_ms_timestamp(item.get('PublishedTime', ''))
-                    if pub_dt and pub_dt.date() < START_DATE:
-                        stop = True
-                        break
-                    link = item.get('LinktoMe') or item.get('LinktoMe2') or ''
-                    if not link or link in seen_urls:
-                        if pid:
-                            new_pids.append(int(pid))
-                        continue
-                    seen_urls.add(link)
-                    new_pids.append(int(pid))
-                    articles.append({
-                        'title':        item.get('Title', '').strip(),
-                        'article_url':  link,
-                        'published_at': pub_dt.isoformat() if pub_dt else None,
-                        '_pid':         pid,
-                        '_headline':    item.get('Headlines', '') or item.get('HeadlinesCutOff2', ''),
-                    })
-
-                if new_pids:
-                    last_pid = str(min(new_pids))
-                if stop or not new_pids:
-                    break
-                time.sleep(0.3)
-
-            except Exception as e:
-                log.warning(f'  nguoiquansat API error: {e}')
+    for _ in range(max_pages):
+        api_url = f'{BASE_URL}/api/getMoreArticle/channel_empty_{last_pid}_{channel_id}_0'
+        try:
+            r = requests.get(api_url, headers=HEADERS_API, timeout=10)
+            if r.status_code != 200:
+                log.warning(f'  nguoiquansat API HTTP {r.status_code} channel {channel_id}')
                 break
+            data = r.json()
+            if not data:
+                break
+
+            stop = False
+            new_pids = []
+            for item in data:
+                pid = str(item.get('PublisherId', ''))
+                pub_dt = parse_ms_timestamp(item.get('PublishedTime', ''))
+                if pub_dt and pub_dt.date() < START_DATE:
+                    stop = True
+                    break
+                link = item.get('LinktoMe') or item.get('LinktoMe2') or ''
+                if not link or link in seen_urls:
+                    if pid:
+                        new_pids.append(int(pid))
+                    continue
+                seen_urls.add(link)
+                if pid:
+                    new_pids.append(int(pid))
+                articles.append({
+                    'title':        item.get('Title', '').strip(),
+                    'article_url':  link,
+                    'published_at': pub_dt.isoformat() if pub_dt else None,
+                    '_pid':         pid,
+                    '_headline':    item.get('Headlines', '') or item.get('HeadlinesCutOff2', ''),
+                })
+
+            if new_pids:
+                last_pid = str(min(new_pids))
+            if stop or not new_pids:
+                break
+            time.sleep(0.3)
+
+        except Exception as e:
+            log.warning(f'  nguoiquansat API error channel {channel_id}: {e}')
+            break
 
     return articles
 
