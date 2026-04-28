@@ -352,6 +352,7 @@ def run(test_email: str = None):
             ok += 1
         else:
             fail += 1
+        import time as _time; _time.sleep(0.6)
 
     log.info(f'=== XONG: Gui OK={ok} | Fail={fail} | Skip={skip} ===')
 
