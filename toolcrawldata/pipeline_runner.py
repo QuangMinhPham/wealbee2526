@@ -184,7 +184,7 @@ def run_label(new_urls: list[str]) -> int:
         client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'), max_retries=1, timeout=15.0)
         sb     = get_client()
 
-        # Lấy ID các bài mới có symbol, chưa label
+        # Lấy ID các bài mới chưa label (không yêu cầu có symbol)
         new_ids = []
         batch_size_url = 50
         for i in range(0, len(new_urls), batch_size_url):
@@ -194,12 +194,11 @@ def run_label(new_urls: list[str]) -> int:
                 .select('id')
                 .in_('article_url', chunk)
                 .is_('label', 'null')
-                .not_.is_('symbol', 'null')
                 .execute()
             )
             new_ids += [r['id'] for r in (result.data or [])]
 
-        log.info(f'  Bai moi co symbol chua label: {len(new_ids)}')
+        log.info(f'  Bai moi chua label: {len(new_ids)}')
         if not new_ids:
             log.info('  Khong co bai nao can label')
             return 0

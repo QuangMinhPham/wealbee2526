@@ -64,7 +64,11 @@ def fetch_subscribers(sb) -> list[dict]:
 
 
 def fetch_news_for_symbol(sb, symbol: str, since_date: str) -> list[dict]:
-    result = (
+    seen_ids = set()
+    results = []
+
+    # 1. Bài có symbol khớp trực tiếp
+    r1 = (
         sb.table('market_news')
         .select('id,title,content,article_url,label,source,published_at,news_type,affected_symbols')
         .eq('symbol', symbol)
@@ -75,7 +79,29 @@ def fetch_news_for_symbol(sb, symbol: str, since_date: str) -> list[dict]:
         .limit(5)
         .execute()
     )
-    return result.data or []
+    for row in (r1.data or []):
+        seen_ids.add(row['id'])
+        results.append(row)
+
+    # 2. Bài LLM gán symbol vào affected_symbols (bài không có symbol trực tiếp)
+    if len(results) < 5:
+        r2 = (
+            sb.table('market_news')
+            .select('id,title,content,article_url,label,source,published_at,news_type,affected_symbols')
+            .contains('affected_symbols', [symbol])
+            .not_.is_('label', 'null')
+            .neq('label', 'trash')
+            .gte('labeled_at', since_date)
+            .order('published_at', desc=True)
+            .limit(5)
+            .execute()
+        )
+        for row in (r2.data or []):
+            if row['id'] not in seen_ids:
+                seen_ids.add(row['id'])
+                results.append(row)
+
+    return results[:5]
 
 
 def _news_item_html(news: dict, symbol: str, quantity: int) -> str:
