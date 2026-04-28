@@ -56,16 +56,22 @@ def extract_symbol(text: str):
 
 
 def parse_date(text: str):
-    """Parse date từ nguoiquansat: '28/04/2026 - 09:37' hoặc ISO."""
+    """Parse date từ nguoiquansat: '28/04/2026 - 09:37', '28/04/2026 15:31' hoặc ISO."""
     if not text:
         return None
     text = text.strip()
-    for fmt in ['%d/%m/%Y - %H:%M', '%d/%m/%Y', '%m/%d/%Y %I:%M:%S %p', '%Y-%m-%dT%H:%M:%S']:
+    for fmt in ['%d/%m/%Y - %H:%M', '%d/%m/%Y %H:%M', '%d/%m/%Y', '%m/%d/%Y %I:%M:%S %p', '%Y-%m-%dT%H:%M:%S']:
         try:
             return datetime.strptime(text, fmt)
         except ValueError:
             continue
-    # ISO fallback
+    # Regex fallback: tìm pattern ngày giờ bất kỳ trong chuỗi
+    m = re.search(r'(\d{2}/\d{2}/\d{4})\s*[-–]?\s*(\d{2}:\d{2})', text)
+    if m:
+        try:
+            return datetime.strptime(f"{m.group(1)} {m.group(2)}", '%d/%m/%Y %H:%M')
+        except Exception:
+            pass
     m = re.search(r'(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})', text)
     if m:
         try:
@@ -137,11 +143,19 @@ def enrich_article(article: dict) -> dict | None:
         content_div = soup.select_one('.b-maincontent, .entry, .article-content, .detail-content, .post-content, .entry-content, .c-news-detail-scroll__right')
         if not content_div:
             return None
-        # Xóa script/style
-        for tag in content_div.select('script, style, .advertisement, .ads'):
+        # Xóa script/style/breadcrumb/author/date header
+        for tag in content_div.select('script, style, .advertisement, .ads, h1, .c-breadcrumb, .b-author, .b-date, .c-related-posts, .c-box'):
             tag.decompose()
         content = content_div.get_text(separator=' ', strip=True)
         content = re.sub(r'\s+', ' ', content).strip()
+        # Bỏ title ở đầu nếu còn sót
+        if title and content.startswith(title):
+            content = content[len(title):].strip()
+        # Bỏ pattern: "Danh mục Tác giả • DD/MM/YYYY - HH:MM" ở đầu
+        content = re.sub(
+            r'^[\w\s\-]+ [A-ZÀ-Ỹa-zà-ỹ\s]+ •\s*\d{2}/\d{2}/\d{4}\s*[-–]?\s*\d{2}:\d{2}\s*',
+            '', content
+        ).strip()
 
         # Symbol
         symbol = extract_symbol(title) or extract_symbol(content[:500])
