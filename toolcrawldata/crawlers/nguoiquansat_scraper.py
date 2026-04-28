@@ -1,5 +1,7 @@
 """
-Scraper cho nguoiquansat.vn — crawl tin tức chứng khoán.
+Scraper cho nguoiquansat.vn — hybrid approach:
+- Trang đầu: parse HTML (đã render sẵn, không cần JS)
+- Trang 2+: dùng internal API /api/getMoreArticle (không bị Cloudflare chặn)
 """
 
 import re
@@ -20,22 +22,28 @@ sys.path.insert(0, str(Path(__file__).parent))
 from supabase_writer import get_client
 
 BASE_URL   = 'https://nguoiquansat.vn'
-CATEGORIES = [
-    '/chung-khoan/chuyen-dong-thi-truong',
-    '/chung-khoan/doanh-nghiep-az',
-    '/chung-khoan/cau-chuyen-dau-tu',
-    '/chung-khoan',
-]
 START_DATE = date.today() - timedelta(days=1)
-WORKERS    = 8
-HEADERS    = {
+WORKERS    = 6
+
+CHANNELS = [
+    (388, 'chung-khoan/chuyen-dong-thi-truong'),
+    (391, 'chung-khoan/doanh-nghiep-az'),
+    (392, 'chung-khoan/cau-chuyen-dau-tu'),
+    (6,   'chung-khoan'),
+]
+
+HEADERS_HTML = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-    'Referer': 'https://nguoiquansat.vn',
-    'Accept-Language': 'vi-VN,vi;q=0.9',
+    'Referer': BASE_URL,
+}
+HEADERS_API = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    'Referer': BASE_URL,
+    'Accept': 'application/json, text/javascript, */*; q=0.01',
+    'X-Requested-With': 'XMLHttpRequest',
 }
 
 log = logging.getLogger('nguoiquansat_scraper')
-
 
 SYMBOL_RE = re.compile(
     r'[\(\[]([A-Z]{2,5})[\)\]]'
@@ -56,123 +64,171 @@ def extract_symbol(text: str):
     return None
 
 
-def parse_date(text: str):
-    """Parse date từ nguoiquansat: '28/04/2026 - 09:37', '28/04/2026 15:31' hoặc ISO."""
-    if not text:
+def parse_ms_timestamp(ts: str) -> datetime | None:
+    try:
+        ms = int(re.search(r'\d+', ts).group())
+        # API trả UTC, cộng 7h để ra giờ VN
+        from datetime import timezone, timedelta as td
+        return datetime.utcfromtimestamp(ms / 1000) + td(hours=7)
+    except Exception:
         return None
-    text = text.strip()
-    for fmt in ['%d/%m/%Y - %H:%M', '%d/%m/%Y %H:%M', '%d/%m/%Y', '%m/%d/%Y %I:%M:%S %p', '%Y-%m-%dT%H:%M:%S']:
-        try:
-            return datetime.strptime(text, fmt)
-        except ValueError:
-            continue
-    # Regex fallback: tìm pattern ngày giờ bất kỳ trong chuỗi
-    m = re.search(r'(\d{2}/\d{2}/\d{4})\s*[-–]?\s*(\d{2}:\d{2})', text)
-    if m:
-        try:
-            return datetime.strptime(f"{m.group(1)} {m.group(2)}", '%d/%m/%Y %H:%M')
-        except Exception:
-            pass
-    m = re.search(r'(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})', text)
-    if m:
-        try:
-            return datetime.fromisoformat(m.group(1))
-        except Exception:
-            pass
-    return None
 
 
-def get_article_list(cat_url: str, pages: int = 10) -> list[dict]:
+def fetch_channel(channel_id: int, channel_slug: str, max_api_pages: int = 3) -> list[dict]:
     articles = []
-    for page in range(1, pages + 1):
-        url = f'{BASE_URL}{cat_url}' if page == 1 else f'{BASE_URL}{cat_url}/trang-{page}'
-        try:
-            r = None
-            for attempt in range(3):
-                r = requests.get(url, headers=HEADERS, timeout=15)
-                if r.status_code == 200:
-                    break
-                time.sleep(2 * (attempt + 1))
-            if not r or r.status_code != 200:
-                log.warning(f'  nguoiquansat: HTTP {r.status_code if r else "?"} trang {page}')
-                break
+    seen_urls = set()
+    last_pid = None
+
+    # --- Trang 1: parse HTML ---
+    url = f'{BASE_URL}/{channel_slug}'
+    try:
+        r = requests.get(url, headers=HEADERS_HTML, timeout=12)
+        if r.status_code == 200:
             soup = BeautifulSoup(r.text, 'html.parser')
-            found = False
-            for a in soup.select('h2 a[href], h3 a[href]'):
-                href = a.get('href', '')
-                title = a.get_text(strip=True)
-                if not href or not title:
+            items = soup.select('.onecms__loading li[pid]')
+            for li in items:
+                pid = li.get('pid', '')
+                a_tag = li.select_one('a[href]')
+                if not a_tag:
                     continue
+                href = a_tag.get('href', '')
                 if not href.startswith('http'):
                     href = BASE_URL + href
-                # Bỏ qua link danh mục
-                if href.rstrip('/') in [BASE_URL + c for c in CATEGORIES]:
-                    continue
-                articles.append({'title': title, 'article_url': href})
-                found = True
-            if not found:
+                title = li.select_one('h3, h2, .title')
+                title = title.get_text(strip=True) if title else a_tag.get_text(strip=True)
+                if href and href not in seen_urls:
+                    seen_urls.add(href)
+                    articles.append({'title': title, 'article_url': href, '_pid': pid, 'published_at': None, '_headline': ''})
+                    if pid:
+                        last_pid = pid
+        else:
+            log.warning(f'  nguoiquansat trang 1 HTTP {r.status_code}')
+    except Exception as e:
+        log.warning(f'  nguoiquansat trang 1 lỗi: {e}')
+
+    # --- Trang 2+: dùng API ---
+    if last_pid:
+        for _ in range(max_api_pages):
+            api_url = f'{BASE_URL}/api/getMoreArticle/channel_empty_{last_pid}_{channel_id}_0'
+            try:
+                r2 = requests.get(api_url, headers=HEADERS_API, timeout=10)
+                if r2.status_code != 200:
+                    break
+                data = r2.json()
+                if not data:
+                    break
+
+                stop = False
+                new_pids = []
+                for item in data:
+                    pid = str(item.get('PublisherId', ''))
+                    pub_dt = parse_ms_timestamp(item.get('PublishedTime', ''))
+                    if pub_dt and pub_dt.date() < START_DATE:
+                        stop = True
+                        break
+                    link = item.get('LinktoMe') or item.get('LinktoMe2') or ''
+                    if not link or link in seen_urls:
+                        if pid:
+                            new_pids.append(int(pid))
+                        continue
+                    seen_urls.add(link)
+                    new_pids.append(int(pid))
+                    articles.append({
+                        'title':        item.get('Title', '').strip(),
+                        'article_url':  link,
+                        'published_at': pub_dt.isoformat() if pub_dt else None,
+                        '_pid':         pid,
+                        '_headline':    item.get('Headlines', '') or item.get('HeadlinesCutOff2', ''),
+                    })
+
+                if new_pids:
+                    last_pid = str(min(new_pids))
+                if stop or not new_pids:
+                    break
+                time.sleep(0.3)
+
+            except Exception as e:
+                log.warning(f'  nguoiquansat API error: {e}')
                 break
-            time.sleep(0.3)
-        except Exception as e:
-            log.warning(f'  Lỗi lấy danh sách {url}: {e}')
-            break
+
     return articles
 
 
 def enrich_article(article: dict) -> dict | None:
     url = article['article_url']
     try:
-        r = requests.get(url, headers=HEADERS, timeout=15)
+        r = requests.get(url, headers=HEADERS_HTML, timeout=15)
         if r.status_code != 200:
-            return None
+            content = article.get('_headline', '')
+            if not content:
+                return None
+            return {
+                'title':        article['title'],
+                'article_url':  url,
+                'content':      content,
+                'published_at': article.get('published_at'),
+                'symbol':       extract_symbol(article['title']) or extract_symbol(content[:500]),
+                'source':       'nguoiquansat',
+                'author':       None,
+            }
+
         soup = BeautifulSoup(r.text, 'html.parser')
 
-        # Title
         title_tag = soup.select_one('h1')
         title = title_tag.get_text(strip=True) if title_tag else article['title']
 
-        # Date
-        pub_dt = None
-        date_tag = soup.select_one('time[datetime], .date, .time, .post-date, .article-date')
-        if date_tag:
-            raw = date_tag.get('datetime') or date_tag.get_text(strip=True)
-            pub_dt = parse_date(raw)
-        if not pub_dt:
-            m = re.search(r'(\d{2}/\d{2}/\d{4}\s*[-–]?\s*\d{2}:\d{2})', r.text)
-            if m:
-                pub_dt = parse_date(m.group(1))
+        # Date — ưu tiên từ API, fallback từ HTML
+        pub_dt_str = article.get('published_at')
+        if not pub_dt_str:
+            date_tag = soup.select_one('time[datetime], .date, .time, .post-date, .article-date')
+            if date_tag:
+                raw = date_tag.get('datetime') or date_tag.get_text(strip=True)
+                m = re.search(r'(\d{2}/\d{2}/\d{4})\s*[-–]?\s*(\d{2}:\d{2})', raw)
+                if m:
+                    try:
+                        pub_dt_str = datetime.strptime(f"{m.group(1)} {m.group(2)}", '%d/%m/%Y %H:%M').isoformat()
+                    except Exception:
+                        pass
+            if not pub_dt_str:
+                m2 = re.search(r'(\d{2}/\d{2}/\d{4})\s*[-–]?\s*(\d{2}:\d{2})', r.text)
+                if m2:
+                    try:
+                        pub_dt_str = datetime.strptime(f"{m2.group(1)} {m2.group(2)}", '%d/%m/%Y %H:%M').isoformat()
+                    except Exception:
+                        pass
 
-        # Filter theo ngày
-        if pub_dt and pub_dt.date() < START_DATE:
+        # Filter ngày
+        if pub_dt_str:
+            try:
+                if datetime.fromisoformat(pub_dt_str).date() < START_DATE:
+                    return None
+            except Exception:
+                pass
+
+        content_div = soup.select_one('.b-maincontent, .entry, .article-content, .detail-content, .post-content, .entry-content')
+        if content_div:
+            for tag in content_div.select('script, style, .advertisement, .ads, h1, .c-breadcrumb, .b-author, .b-date, .c-related-posts, .c-box'):
+                tag.decompose()
+            content = content_div.get_text(separator=' ', strip=True)
+            content = re.sub(r'\s+', ' ', content).strip()
+            if title and content.startswith(title):
+                content = content[len(title):].strip()
+            content = re.sub(
+                r'^[\w\s\-]+ [A-ZÀ-Ỹa-zà-ỹ\s]+ •\s*\d{2}/\d{2}/\d{4}\s*[-–]?\s*\d{2}:\d{2}\s*',
+                '', content
+            ).strip()
+        else:
+            content = article.get('_headline', '')
+
+        if not content:
             return None
-
-        # Content
-        content_div = soup.select_one('.b-maincontent, .entry, .article-content, .detail-content, .post-content, .entry-content, .c-news-detail-scroll__right')
-        if not content_div:
-            return None
-        # Xóa script/style/breadcrumb/author/date header
-        for tag in content_div.select('script, style, .advertisement, .ads, h1, .c-breadcrumb, .b-author, .b-date, .c-related-posts, .c-box'):
-            tag.decompose()
-        content = content_div.get_text(separator=' ', strip=True)
-        content = re.sub(r'\s+', ' ', content).strip()
-        # Bỏ title ở đầu nếu còn sót
-        if title and content.startswith(title):
-            content = content[len(title):].strip()
-        # Bỏ pattern: "Danh mục Tác giả • DD/MM/YYYY - HH:MM" ở đầu
-        content = re.sub(
-            r'^[\w\s\-]+ [A-ZÀ-Ỹa-zà-ỹ\s]+ •\s*\d{2}/\d{2}/\d{4}\s*[-–]?\s*\d{2}:\d{2}\s*',
-            '', content
-        ).strip()
-
-        # Symbol
-        symbol = extract_symbol(title) or extract_symbol(content[:500])
 
         return {
             'title':        title,
             'article_url':  url,
             'content':      content[:5000],
-            'published_at': pub_dt.isoformat() if pub_dt else None,
-            'symbol':       symbol,
+            'published_at': pub_dt_str,
+            'symbol':       extract_symbol(title) or extract_symbol(content[:500]),
             'source':       'nguoiquansat',
             'author':       None,
         }
@@ -184,8 +240,8 @@ def enrich_article(article: dict) -> dict | None:
 def scrape_article_list() -> list[dict]:
     seen = set()
     articles = []
-    for cat in CATEGORIES:
-        for a in get_article_list(cat):
+    for channel_id, slug in CHANNELS:
+        for a in fetch_channel(channel_id, slug):
             if a['article_url'] not in seen:
                 seen.add(a['article_url'])
                 articles.append(a)
@@ -209,18 +265,15 @@ def upsert_to_supabase(articles: list[dict]):
     if not articles:
         return
     sb = get_client()
-    sb.table('market_news').upsert(
-        articles,
-        on_conflict='article_url'
-    ).execute()
+    sb.table('market_news').upsert(articles, on_conflict='article_url').execute()
     log.info(f'  nguoiquansat: upsert {len(articles)} bài')
 
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
     articles = scrape_article_list()
-    articles = enrich_content(articles)
-    print(f'Tổng: {len(articles)} bài')
-    for a in articles[:3]:
+    enriched = enrich_content(articles)
+    print(f'Tổng: {len(enriched)} bài')
+    for a in enriched[:5]:
         print(f"  {a['title'][:60]} | {a['symbol']} | {a['published_at']}")
-    upsert_to_supabase(articles)
+    upsert_to_supabase(enriched)
