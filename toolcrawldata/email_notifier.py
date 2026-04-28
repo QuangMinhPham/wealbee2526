@@ -128,39 +128,34 @@ def _news_item_html(news: dict, symbol: str, quantity: int) -> str:
         if type_tag else ''
     )
 
-    # Nút mở Gemini với prompt research sẵn
+    # Nút mở ChatGPT với prompt research sẵn (ChatGPT hỗ trợ paste nội dung vào box chat)
     deep_prompt = (
         f'Tóm tắt bài báo: {url}\n'
         f'Phân tích tác động của tin này lên cổ phiếu {symbol}.\n'
-        f'Các thông tin bạn hãy tự research và cho tôi biết:\n'
+        f'Bạn hãy research các thông tin cần thiết liên quan để tự cung cấp đủ context nhằm phân tích tin tức và cho tôi biết:\n'
         f'- Tin ảnh hưởng trực tiếp hay gián tiếp?\n'
         f'- Mức độ tác động (mạnh / vừa / yếu)\n'
         f'- Ngắn hạn vs dài hạn\n'
         f'- Thị trường đã phản ánh chưa?\n'
         f'- Kết luận: bullish hay bearish (kèm reasoning)'
     )
-    gemini_url = 'https://gemini.google.com/app?q=' + urllib.parse.quote(deep_prompt)
+    chatgpt_url = 'https://chatgpt.com/?q=' + urllib.parse.quote(deep_prompt)
 
-    # Phần AI Reasoning (nếu có) hoặc placeholder
+    chatgpt_btn = f"""
+                        <a href="{chatgpt_url}" style="display:inline-flex;align-items:center;gap:6px;background:#000000;color:#ffffff;font-size:11px;font-weight:600;padding:7px 14px;border-radius:20px;text-decoration:none;margin-top:10px;">
+                          <img src="https://cdn.oaistatic.com/assets/favicon-o20kmmos.svg" width="13" height="13" style="vertical-align:middle;" alt=""/>
+                          Research sâu hơn
+                        </a>"""
+
+    # Phần AI Reasoning (nếu có) hoặc placeholder — layout column
     if reasoning:
         bottom_block = f"""
                   <table width="100%" cellpadding="0" cellspacing="0" style="background:#ECF2FF;border-radius:8px;">
                     <tr>
-                      <td style="padding:10px 14px;">
-                        <table width="100%" cellpadding="0" cellspacing="0">
-                          <tr>
-                            <td>
-                              <p style="margin:0 0 5px;color:#0849AC;font-size:11px;font-weight:700;letter-spacing:0.5px;">AI REASONING</p>
-                              <p style="margin:0;color:#4A5568;font-size:12px;line-height:1.6;">{reasoning}</p>
-                            </td>
-                            <td style="vertical-align:top;padding-left:12px;white-space:nowrap;">
-                              <a href="{gemini_url}" style="display:inline-flex;align-items:center;gap:5px;background:#1A73E8;color:#ffffff;font-size:11px;font-weight:600;padding:6px 12px;border-radius:20px;text-decoration:none;">
-                                <img src="https://www.gstatic.com/lamda/images/gemini_sparkle_v002_d4735304ff6292a690345.svg" width="14" height="14" style="vertical-align:middle;" alt=""/>
-                                Research sâu hơn
-                              </a>
-                            </td>
-                          </tr>
-                        </table>
+                      <td style="padding:12px 14px;">
+                        <p style="margin:0 0 5px;color:#0849AC;font-size:11px;font-weight:700;letter-spacing:0.5px;">AI REASONING</p>
+                        <p style="margin:0;color:#4A5568;font-size:12px;line-height:1.6;">{reasoning}</p>
+                        {chatgpt_btn}
                       </td>
                     </tr>
                   </table>"""
@@ -168,20 +163,9 @@ def _news_item_html(news: dict, symbol: str, quantity: int) -> str:
         bottom_block = f"""
                   <table width="100%" cellpadding="0" cellspacing="0" style="background:#F8F9FB;border-radius:8px;border:1px solid #ECECF0;">
                     <tr>
-                      <td style="padding:10px 14px;">
-                        <table width="100%" cellpadding="0" cellspacing="0">
-                          <tr>
-                            <td>
-                              <p style="margin:0;color:#9CA3AF;font-size:12px;font-style:italic;">Chưa có AI reasoning cho bài này.</p>
-                            </td>
-                            <td style="vertical-align:middle;padding-left:12px;white-space:nowrap;">
-                              <a href="{gemini_url}" style="display:inline-flex;align-items:center;gap:5px;background:#1A73E8;color:#ffffff;font-size:11px;font-weight:600;padding:6px 12px;border-radius:20px;text-decoration:none;">
-                                <img src="https://www.gstatic.com/lamda/images/gemini_sparkle_v002_d4735304ff6292a690345.svg" width="14" height="14" style="vertical-align:middle;" alt=""/>
-                                Phân tích với Gemini
-                              </a>
-                            </td>
-                          </tr>
-                        </table>
+                      <td style="padding:12px 14px;">
+                        <p style="margin:0 0 8px;color:#9CA3AF;font-size:12px;font-style:italic;">Chưa có AI reasoning cho bài này.</p>
+                        {chatgpt_btn}
                       </td>
                     </tr>
                   </table>"""
