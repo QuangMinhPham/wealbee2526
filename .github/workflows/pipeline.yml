@@ -26,9 +26,9 @@ jobs:
 
       - name: Validate secrets
         run: |
-          [ -z "${{ secrets.SUPABASE_URL }}" ]         && echo "::error::SUPABASE_URL missing"         && exit 1 || true
-          [ -z "${{ secrets.SUPABASE_SERVICE_KEY }}" ] && echo "::error::SUPABASE_SERVICE_KEY missing" && exit 1 || true
-          [ -z "${{ secrets.OPENAI_API_KEY }}" ]       && echo "::error::OPENAI_API_KEY missing"       && exit 1 || true
+          [ -n "${{ secrets.SUPABASE_URL }}" ]         || { echo "::error::SUPABASE_URL missing";         exit 1; }
+          [ -n "${{ secrets.SUPABASE_SERVICE_KEY }}" ] || { echo "::error::SUPABASE_SERVICE_KEY missing"; exit 1; }
+          [ -n "${{ secrets.OPENAI_API_KEY }}" ]       || { echo "::error::OPENAI_API_KEY missing";       exit 1; }
 
       - name: Dependency security audit
         run: |
