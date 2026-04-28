@@ -107,6 +107,30 @@ def run_crawl() -> list[str]:
     except Exception as e:
         log.error(f'  VnExpress loi: {e}')
 
+    # Nguoi Quan Sat
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('nguoiquansat_scraper', CRAWLERS_DIR / 'nguoiquansat_scraper.py')
+        mod  = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        mod.START_DATE = date.today() - timedelta(days=1)
+
+        articles = mod.scrape_article_list()
+        if articles:
+            articles = mod.enrich_content(articles)
+            new_articles = [
+                a for a in articles
+                if a.get('article_url') and a['article_url'] not in existing_urls
+            ]
+            mod.upsert_to_supabase(articles)
+            all_new_urls += [a['article_url'] for a in new_articles if a.get('article_url')]
+            log.info(f'  NguoiQuanSat: {len(articles)} crawl, {len(new_articles)} bai INSERT moi')
+        else:
+            log.warning('  NguoiQuanSat: khong co bai nao')
+    except Exception as e:
+        log.error(f'  NguoiQuanSat loi: {e}')
+
     # Vietstock
     try:
         import importlib.util
