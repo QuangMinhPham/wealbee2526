@@ -164,16 +164,12 @@ def run_crawl() -> list[str]:
 
 def run_label(new_urls: list[str]) -> int:
     """
-    Gán nhãn chỉ những bài vừa INSERT mới (theo URL), có symbol, chưa có label.
-    Mỗi bài: label tác động (positive/negative/neutral/trash) + news_type (6 loại)
-             + affected_symbols (mảng mã bị ảnh hưởng).
+    Gán nhãn tất cả bài trong 24h qua chưa có label.
+    Không phụ thuộc vào new_urls — bao gồm cả bài từ hôm qua chưa được label.
+    Mỗi bài: label tác động + news_type (6 loại) + affected_symbols.
     Trả về số bài đã label.
     """
     step_header(2, 'GÁN NHÃN GPT-4.1-mini')
-
-    if not new_urls:
-        log.info('  Khong co bai INSERT moi -> bo qua label')
-        return 0
 
     try:
         import os, json
@@ -184,21 +180,26 @@ def run_label(new_urls: list[str]) -> int:
         client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'), max_retries=1, timeout=15.0)
         sb     = get_client()
 
-        # Lấy ID các bài mới chưa label (không yêu cầu có symbol)
+        # Lấy tất cả bài trong 24h qua chưa label (kể cả bài không có symbol)
+        since = (datetime.now() - timedelta(hours=24)).isoformat()
         new_ids = []
-        batch_size_url = 50
-        for i in range(0, len(new_urls), batch_size_url):
-            chunk = new_urls[i:i + batch_size_url]
+        offset = 0
+        while True:
             result = (
                 sb.table('market_news')
                 .select('id')
-                .in_('article_url', chunk)
                 .is_('label', 'null')
+                .gte('published_at', since)
+                .range(offset, offset + 999)
                 .execute()
             )
-            new_ids += [r['id'] for r in (result.data or [])]
+            rows = result.data or []
+            new_ids += [r['id'] for r in rows]
+            if len(rows) < 1000:
+                break
+            offset += 1000
 
-        log.info(f'  Bai moi chua label: {len(new_ids)}')
+        log.info(f'  Bai trong 24h chua label: {len(new_ids)}')
         if not new_ids:
             log.info('  Khong co bai nao can label')
             return 0
@@ -328,10 +329,7 @@ def main():
     n_label = run_label(new_urls)
     time.sleep(2)
 
-    if n_label > 0:
-        run_email()
-    else:
-        log.info('  Khong co bai moi co nhan → bo qua gui email')
+    run_email()
 
     elapsed = time.time() - start
     log.info('=' * 55)
