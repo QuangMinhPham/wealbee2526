@@ -65,7 +65,8 @@ def run_crawl() -> list[str]:
     sb = get_client()
 
     # Lấy set article_url đã tồn tại TRƯỚC khi crawl
-    since = (datetime.utcnow() - timedelta(hours=24)).isoformat()
+    # published_at lưu giờ VN (UTC+7) → dùng giờ local thay vì UTC
+    since = (datetime.now() - timedelta(hours=24)).isoformat()
     existing_urls = set()
     offset = 0
     while True:
@@ -97,7 +98,6 @@ def run_crawl() -> list[str]:
             new_articles = [
                 a for a in articles
                 if a.get('article_url') and a['article_url'] not in existing_urls
-                and a.get('published_at') and a['published_at'] >= since
             ]
             mod.upsert_to_supabase(articles)
             all_new_urls += [a['article_url'] for a in new_articles if a.get('article_url')]
@@ -122,7 +122,6 @@ def run_crawl() -> list[str]:
             new_articles = [
                 a for a in articles
                 if a.get('article_url') and a['article_url'] not in existing_urls
-                and a.get('published_at') and a['published_at'] >= since
             ]
             mod.upsert_news_to_supabase(articles)
             all_new_urls += [a.get('article_url') or a.get('Link bài viết') for a in new_articles]
