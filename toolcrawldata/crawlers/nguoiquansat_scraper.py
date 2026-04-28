@@ -1,7 +1,6 @@
 """
-Scraper cho nguoiquansat.vn — hybrid approach:
-- Trang đầu: parse HTML (đã render sẵn, không cần JS)
-- Trang 2+: dùng internal API /api/getMoreArticle (không bị Cloudflare chặn)
+Scraper cho nguoiquansat.vn — pure API, không scrape HTML.
+API /api/getMoreArticle trả về title + headline + date + url, không bị Cloudflare chặn.
 """
 
 import re
@@ -10,10 +9,8 @@ import time
 import logging
 from datetime import datetime, date, timedelta
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
-from bs4 import BeautifulSoup
 
 if sys.stdout.encoding != 'utf-8':
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -23,7 +20,6 @@ from supabase_writer import get_client
 
 BASE_URL   = 'https://nguoiquansat.vn'
 START_DATE = date.today() - timedelta(days=1)
-WORKERS    = 6
 
 CHANNELS = [
     (388, 'chung-khoan/chuyen-dong-thi-truong'),
@@ -32,11 +28,7 @@ CHANNELS = [
     (6,   'chung-khoan'),
 ]
 
-HEADERS_HTML = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-    'Referer': BASE_URL,
-}
-HEADERS_API = {
+HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
     'Referer': BASE_URL,
     'Accept': 'application/json, text/javascript, */*; q=0.01',
@@ -67,23 +59,22 @@ def extract_symbol(text: str):
 def parse_ms_timestamp(ts: str) -> datetime | None:
     try:
         ms = int(re.search(r'\d+', ts).group())
-        # API trả UTC, cộng 7h để ra giờ VN
-        from datetime import timezone, timedelta as td
-        return datetime.utcfromtimestamp(ms / 1000) + td(hours=7)
+        # API trả UTC, cộng 7h ra giờ VN
+        return datetime.utcfromtimestamp(ms / 1000) + timedelta(hours=7)
     except Exception:
         return None
 
 
-def fetch_channel(channel_id: int, channel_slug: str, max_pages: int = 4) -> list[dict]:
-    """Dùng API hoàn toàn — pid=0 lấy bài mới nhất, sau đó paginate bằng pid nhỏ nhất."""
+def fetch_channel(channel_id: int, max_pages: int = 4) -> list[dict]:
+    """Dùng API hoàn toàn — pid=0 lấy bài mới nhất, paginate bằng min(pid)."""
     articles = []
     seen_urls = set()
-    last_pid = 0  # pid=0 = lấy bài mới nhất
+    last_pid = 0
 
     for _ in range(max_pages):
         api_url = f'{BASE_URL}/api/getMoreArticle/channel_empty_{last_pid}_{channel_id}_0'
         try:
-            r = requests.get(api_url, headers=HEADERS_API, timeout=10)
+            r = requests.get(api_url, headers=HEADERS, timeout=10)
             if r.status_code != 200:
                 log.warning(f'  nguoiquansat API HTTP {r.status_code} channel {channel_id}')
                 break
@@ -94,7 +85,7 @@ def fetch_channel(channel_id: int, channel_slug: str, max_pages: int = 4) -> lis
             stop = False
             new_pids = []
             for item in data:
-                pid = str(item.get('PublisherId', ''))
+                pid = item.get('PublisherId')
                 pub_dt = parse_ms_timestamp(item.get('PublishedTime', ''))
                 if pub_dt and pub_dt.date() < START_DATE:
                     stop = True
@@ -107,12 +98,19 @@ def fetch_channel(channel_id: int, channel_slug: str, max_pages: int = 4) -> lis
                 seen_urls.add(link)
                 if pid:
                     new_pids.append(int(pid))
+
+                title = (item.get('Title') or '').strip()
+                content = (item.get('Headlines') or item.get('HeadlinesCutOff2') or '').strip()
+                symbol = extract_symbol(title) or extract_symbol(content)
+
                 articles.append({
-                    'title':        item.get('Title', '').strip(),
+                    'title':        title,
                     'article_url':  link,
+                    'content':      content,
                     'published_at': pub_dt.isoformat() if pub_dt else None,
-                    '_pid':         pid,
-                    '_headline':    item.get('Headlines', '') or item.get('HeadlinesCutOff2', ''),
+                    'symbol':       symbol,
+                    'source':       'nguoiquansat',
+                    'author':       None,
                 })
 
             if new_pids:
@@ -128,94 +126,11 @@ def fetch_channel(channel_id: int, channel_slug: str, max_pages: int = 4) -> lis
     return articles
 
 
-def enrich_article(article: dict) -> dict | None:
-    url = article['article_url']
-    try:
-        r = requests.get(url, headers=HEADERS_HTML, timeout=15)
-        if r.status_code != 200:
-            content = article.get('_headline', '')
-            if not content:
-                return None
-            return {
-                'title':        article['title'],
-                'article_url':  url,
-                'content':      content,
-                'published_at': article.get('published_at'),
-                'symbol':       extract_symbol(article['title']) or extract_symbol(content[:500]),
-                'source':       'nguoiquansat',
-                'author':       None,
-            }
-
-        soup = BeautifulSoup(r.text, 'html.parser')
-
-        title_tag = soup.select_one('h1')
-        title = title_tag.get_text(strip=True) if title_tag else article['title']
-
-        # Date — ưu tiên từ API, fallback từ HTML
-        pub_dt_str = article.get('published_at')
-        if not pub_dt_str:
-            date_tag = soup.select_one('time[datetime], .date, .time, .post-date, .article-date')
-            if date_tag:
-                raw = date_tag.get('datetime') or date_tag.get_text(strip=True)
-                m = re.search(r'(\d{2}/\d{2}/\d{4})\s*[-–]?\s*(\d{2}:\d{2})', raw)
-                if m:
-                    try:
-                        pub_dt_str = datetime.strptime(f"{m.group(1)} {m.group(2)}", '%d/%m/%Y %H:%M').isoformat()
-                    except Exception:
-                        pass
-            if not pub_dt_str:
-                m2 = re.search(r'(\d{2}/\d{2}/\d{4})\s*[-–]?\s*(\d{2}:\d{2})', r.text)
-                if m2:
-                    try:
-                        pub_dt_str = datetime.strptime(f"{m2.group(1)} {m2.group(2)}", '%d/%m/%Y %H:%M').isoformat()
-                    except Exception:
-                        pass
-
-        # Filter ngày
-        if pub_dt_str:
-            try:
-                if datetime.fromisoformat(pub_dt_str).date() < START_DATE:
-                    return None
-            except Exception:
-                pass
-
-        content_div = soup.select_one('.b-maincontent, .entry, .article-content, .detail-content, .post-content, .entry-content')
-        if content_div:
-            for tag in content_div.select('script, style, .advertisement, .ads, h1, .c-breadcrumb, .b-author, .b-date, .c-related-posts, .c-box'):
-                tag.decompose()
-            content = content_div.get_text(separator=' ', strip=True)
-            content = re.sub(r'\s+', ' ', content).strip()
-            if title and content.startswith(title):
-                content = content[len(title):].strip()
-            content = re.sub(
-                r'^[\w\s\-]+ [A-ZÀ-Ỹa-zà-ỹ\s]+ •\s*\d{2}/\d{2}/\d{4}\s*[-–]?\s*\d{2}:\d{2}\s*',
-                '', content
-            ).strip()
-        else:
-            content = article.get('_headline', '')
-
-        if not content:
-            return None
-
-        return {
-            'title':        title,
-            'article_url':  url,
-            'content':      content[:5000],
-            'published_at': pub_dt_str,
-            'symbol':       extract_symbol(title) or extract_symbol(content[:500]),
-            'source':       'nguoiquansat',
-            'author':       None,
-        }
-    except Exception as e:
-        log.warning(f'  Lỗi enrich {url}: {e}')
-        return None
-
-
 def scrape_article_list() -> list[dict]:
     seen = set()
     articles = []
-    for channel_id, slug in CHANNELS:
-        for a in fetch_channel(channel_id, slug):
+    for channel_id, _ in CHANNELS:
+        for a in fetch_channel(channel_id):
             if a['article_url'] not in seen:
                 seen.add(a['article_url'])
                 articles.append(a)
@@ -224,15 +139,10 @@ def scrape_article_list() -> list[dict]:
 
 
 def enrich_content(articles: list[dict]) -> list[dict]:
-    results = []
-    with ThreadPoolExecutor(max_workers=WORKERS) as executor:
-        futures = {executor.submit(enrich_article, a): a for a in articles}
-        for future in as_completed(futures):
-            result = future.result()
-            if result:
-                results.append(result)
-    log.info(f'  nguoiquansat: {len(results)} bài sau enrich')
-    return results
+    # API đã có đủ title + content (headline) + date + symbol — không cần fetch HTML
+    valid = [a for a in articles if a.get('content')]
+    log.info(f'  nguoiquansat: {len(valid)} bài sau enrich')
+    return valid
 
 
 def upsert_to_supabase(articles: list[dict]):
