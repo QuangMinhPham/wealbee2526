@@ -214,6 +214,9 @@ def upsert_news_to_supabase(articles: list[dict]) -> None:
     seen_urls = set()
     for a in articles:
         url = a.get("Link bài viết") or None
+        # Normalize fili.vn → vietstock.vn (cùng domain, tránh trùng bài)
+        if url and 'fili.vn' in url:
+            url = url.replace('fili.vn', 'vietstock.vn').replace('http://', 'https://')
         if url and url in seen_urls:
             continue
         if url:
