@@ -94,7 +94,11 @@ def run_crawl() -> list[str]:
         articles = mod.scrape_article_list()
         if articles:
             articles = mod.enrich_content(articles)
-            new_articles = [a for a in articles if a.get('article_url') and a['article_url'] not in existing_urls]
+            new_articles = [
+                a for a in articles
+                if a.get('article_url') and a['article_url'] not in existing_urls
+                and a.get('published_at') and a['published_at'] >= since
+            ]
             mod.upsert_to_supabase(articles)
             all_new_urls += [a['article_url'] for a in new_articles if a.get('article_url')]
             log.info(f'  VnExpress: {len(articles)} crawl, {len(new_articles)} bai INSERT moi')
@@ -115,7 +119,11 @@ def run_crawl() -> list[str]:
         articles = mod.scrape_article_list()
         if articles:
             articles = mod.enrich_content(articles)
-            new_articles = [a for a in articles if a.get('article_url') and a['article_url'] not in existing_urls]
+            new_articles = [
+                a for a in articles
+                if a.get('article_url') and a['article_url'] not in existing_urls
+                and a.get('published_at') and a['published_at'] >= since
+            ]
             mod.upsert_news_to_supabase(articles)
             all_new_urls += [a.get('article_url') or a.get('Link bài viết') for a in new_articles]
             log.info(f'  Vietstock: {len(articles)} crawl, {len(new_articles)} bai INSERT moi')

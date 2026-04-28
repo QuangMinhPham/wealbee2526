@@ -60,6 +60,7 @@ def fetch_news_for_symbol(sb, symbol: str, since_date: str) -> list[dict]:
         .eq('symbol', symbol)
         .not_.is_('label', 'null')
         .neq('label', 'trash')
+        .gte('published_at', since_date)
         .gte('labeled_at', since_date)
         .order('published_at', desc=True)
         .limit(5)
