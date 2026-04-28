@@ -31,6 +31,7 @@ WORKERS    = 8
 HEADERS    = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
     'Referer': 'https://nguoiquansat.vn',
+    'Accept-Language': 'vi-VN,vi;q=0.9',
 }
 
 log = logging.getLogger('nguoiquansat_scraper')
@@ -86,8 +87,14 @@ def get_article_list(cat_url: str, pages: int = 10) -> list[dict]:
     for page in range(1, pages + 1):
         url = f'{BASE_URL}{cat_url}' if page == 1 else f'{BASE_URL}{cat_url}/trang-{page}'
         try:
-            r = requests.get(url, headers=HEADERS, timeout=10)
-            if r.status_code != 200:
+            r = None
+            for attempt in range(3):
+                r = requests.get(url, headers=HEADERS, timeout=15)
+                if r.status_code == 200:
+                    break
+                time.sleep(2 * (attempt + 1))
+            if not r or r.status_code != 200:
+                log.warning(f'  nguoiquansat: HTTP {r.status_code if r else "?"} trang {page}')
                 break
             soup = BeautifulSoup(r.text, 'html.parser')
             found = False
@@ -131,7 +138,7 @@ def enrich_article(article: dict) -> dict | None:
             raw = date_tag.get('datetime') or date_tag.get_text(strip=True)
             pub_dt = parse_date(raw)
         if not pub_dt:
-            m = re.search(r'(\d{2}/\d{2}/\d{4}\s*[-–]\s*\d{2}:\d{2})', r.text)
+            m = re.search(r'(\d{2}/\d{2}/\d{4}\s*[-–]?\s*\d{2}:\d{2})', r.text)
             if m:
                 pub_dt = parse_date(m.group(1))
 

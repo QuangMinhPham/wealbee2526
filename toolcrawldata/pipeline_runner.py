@@ -165,25 +165,26 @@ def run_crawl() -> list[str]:
 def run_label(new_urls: list[str]) -> int:
     """
     Gán nhãn chỉ những bài vừa INSERT mới (theo URL), có symbol, chưa có label.
+    Mỗi bài: label tác động (positive/negative/neutral/trash) + news_type (6 loại)
+             + affected_symbols (mảng mã bị ảnh hưởng).
     Trả về số bài đã label.
     """
-    step_header(2, 'GÁN NHÃN GPT-4o-mini')
+    step_header(2, 'GÁN NHÃN GPT-4.1-mini')
 
     if not new_urls:
-        log.info('  Khong co bai INSERT moi → bo qua label')
+        log.info('  Khong co bai INSERT moi -> bo qua label')
         return 0
 
     try:
-        import os
+        import os, json
         from openai import OpenAI
         from supabase_writer import get_client
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
-        client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'), max_retries=1, timeout=10.0)
+        client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'), max_retries=1, timeout=15.0)
         sb     = get_client()
 
-        # Lấy ID của các bài mới INSERT theo URL, có symbol, chưa label
-        # Query theo batch 50 URL để tránh URL quá dài
+        # Lấy ID các bài mới có symbol, chưa label
         new_ids = []
         batch_size_url = 50
         for i in range(0, len(new_urls), batch_size_url):
@@ -204,15 +205,32 @@ def run_label(new_urls: list[str]) -> int:
             return 0
 
         SYSTEM_PROMPT = """Bạn là chuyên gia phân tích tin tức tài chính Việt Nam.
-Phân loại bài báo theo đúng một trong 4 nhãn:
-- positive: tin tốt, tích cực
-- negative: tin xấu, tiêu cực
-- neutral: thông tin trung tính
-- trash: không có giá trị tin tức
+Phân tích bài báo và trả về JSON với 3 trường:
 
-Chỉ trả lời đúng một từ: positive / negative / neutral / trash"""
+1. "label": tác động đến giá cổ phiếu
+   - "positive": tin tốt, tích cực
+   - "negative": tin xấu, tiêu cực
+   - "neutral": thông tin trung tính
+   - "trash": không có giá trị phân tích
 
-        VALID_LABELS = {'positive', 'negative', 'neutral', 'trash'}
+2. "news_type": loại tin tức
+   - "vi_mo": kinh tế vĩ mô, chính sách nhà nước, lãi suất, tỷ giá, GDP
+   - "vi_mo_dn": tin tức vi mô ảnh hưởng nhiều doanh nghiệp cùng ngành
+   - "hoat_dong_kd": kết quả kinh doanh, lợi nhuận, doanh thu, M&A của 1 doanh nghiệp cụ thể
+   - "phap_ly": pháp lý, quy định, cơ cấu cổ đông, phát hành cổ phiếu
+   - "thi_truong": diễn biến thị trường, chỉ số, dòng tiền, khối ngoại
+   - "du_bao": dự báo, khuyến nghị, phân tích kỹ thuật
+
+3. "affected_symbols": mảng mã cổ phiếu bị ảnh hưởng (viết hoa, tối đa 5 mã)
+   - Với tin vĩ mô/thị trường: liệt kê các mã blue-chip liên quan (VIC, VNM, HPG...)
+   - Với tin doanh nghiệp cụ thể: chỉ mã đó
+   - Nếu không xác định được: mảng rỗng []
+
+Chỉ trả về JSON, không giải thích. Ví dụ:
+{"label":"positive","news_type":"hoat_dong_kd","affected_symbols":["FPT"]}"""
+
+        VALID_LABELS    = {'positive', 'negative', 'neutral', 'trash'}
+        VALID_TYPES     = {'vi_mo', 'vi_mo_dn', 'hoat_dong_kd', 'phap_ly', 'thi_truong', 'du_bao'}
 
         def label_one(article):
             text = f"Tiêu đề: {article.get('title','')}\nNội dung: {(article.get('content') or '')[:1500]}"
@@ -223,17 +241,29 @@ Chỉ trả lời đúng một từ: positive / negative / neutral / trash"""
                         {'role': 'system', 'content': SYSTEM_PROMPT},
                         {'role': 'user',   'content': text},
                     ],
-                    max_tokens=5,
+                    max_tokens=80,
                     temperature=0,
+                    response_format={'type': 'json_object'},
                 )
-                raw = resp.choices[0].message.content.strip().lower()
-                return article['id'], next((l for l in VALID_LABELS if l in raw), 'neutral')
+                raw = resp.choices[0].message.content.strip()
+                data = json.loads(raw)
+                label    = data.get('label', 'neutral')
+                ntype    = data.get('news_type', 'thi_truong')
+                affected = data.get('affected_symbols', [])
+                if label not in VALID_LABELS:
+                    label = 'neutral'
+                if ntype not in VALID_TYPES:
+                    ntype = 'thi_truong'
+                if not isinstance(affected, list):
+                    affected = []
+                affected = [s for s in affected if isinstance(s, str) and s.isupper()][:5]
+                return article['id'], label, ntype, affected
             except Exception as e:
                 err = str(e)
                 if '429' in err or 'rate_limit' in err:
                     raise
                 log.warning(f'  API loi {article["id"][:8]}: {e}')
-                return article['id'], 'neutral'
+                return article['id'], 'neutral', 'thi_truong', []
 
         total_labeled = 0
         batch_size = 50
@@ -242,7 +272,7 @@ Chỉ trả lời đúng một từ: positive / negative / neutral / trash"""
             chunk_ids = new_ids[i:i + batch_size]
             result = (
                 sb.table('market_news')
-                .select('id,title,content')
+                .select('id,title,content,symbol')
                 .in_('id', chunk_ids)
                 .execute()
             )
@@ -254,11 +284,13 @@ Chỉ trả lời đúng một từ: positive / negative / neutral / trash"""
             with ThreadPoolExecutor(max_workers=5) as executor:
                 futures = {executor.submit(label_one, a): a for a in articles}
                 for future in as_completed(futures):
-                    rec_id, label = future.result()
+                    rec_id, label, ntype, affected = future.result()
                     sb.table('market_news').update({
-                        'label':      label,
-                        'labeled_at': datetime.now().isoformat(),
-                        'labeled_by': 'gpt-4o-mini',
+                        'label':            label,
+                        'news_type':        ntype,
+                        'affected_symbols': affected,
+                        'labeled_at':       datetime.now().isoformat(),
+                        'labeled_by':       'gpt-4.1-mini',
                     }).eq('id', rec_id).execute()
                     total_labeled += 1
 

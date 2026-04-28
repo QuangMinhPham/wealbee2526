@@ -47,6 +47,16 @@ LABEL_COLOR  = {'positive': '#2E7D32',  'negative': '#D4183D',  'neutral': '#F59
 LABEL_BG     = {'positive': '#E8F5E9',  'negative': '#FDE8EC',  'neutral': '#FEF3C7'}
 LABEL_BORDER = {'positive': '#2E7D32',  'negative': '#D4183D',  'neutral': '#F59E0B'}
 
+# ── Tag loại tin ──────────────────────────────────────────────────────────────
+NEWS_TYPE_VI = {
+    'vi_mo':        'Vĩ mô',
+    'vi_mo_dn':     'Vĩ mô ngành',
+    'hoat_dong_kd': 'Hoạt động KD',
+    'phap_ly':      'Pháp lý',
+    'thi_truong':   'Thị trường',
+    'du_bao':       'Dự báo',
+}
+
 
 def fetch_subscribers(sb) -> list[dict]:
     result = sb.table('subscribers').select('email,holdings').execute()
@@ -56,7 +66,7 @@ def fetch_subscribers(sb) -> list[dict]:
 def fetch_news_for_symbol(sb, symbol: str, since_date: str) -> list[dict]:
     result = (
         sb.table('market_news')
-        .select('id,title,content,article_url,label,source,published_at')
+        .select('id,title,content,article_url,label,source,published_at,news_type,affected_symbols')
         .eq('symbol', symbol)
         .not_.is_('label', 'null')
         .neq('label', 'trash')
@@ -69,20 +79,29 @@ def fetch_news_for_symbol(sb, symbol: str, since_date: str) -> list[dict]:
 
 
 def _news_item_html(news: dict, symbol: str, quantity: int) -> str:
-    label   = news.get('label', 'neutral')
-    color   = LABEL_COLOR.get(label, '#F59E0B')
-    bg      = LABEL_BG.get(label, '#FEF3C7')
-    border  = LABEL_BORDER.get(label, '#F59E0B')
-    badge   = LABEL_VI.get(label, 'TRUNG LẬP')
-    title   = news.get('title', '')
-    url     = news.get('article_url', '#')
-    source  = news.get('source', '')
-    content = (news.get('content') or '')[:180].strip()
+    label    = news.get('label', 'neutral')
+    color    = LABEL_COLOR.get(label, '#F59E0B')
+    bg       = LABEL_BG.get(label, '#FEF3C7')
+    border   = LABEL_BORDER.get(label, '#F59E0B')
+    badge    = LABEL_VI.get(label, 'TRUNG LẬP')
+    ntype    = news.get('news_type') or ''
+    type_tag = NEWS_TYPE_VI.get(ntype, '')
+    title    = news.get('title', '')
+    url      = news.get('article_url', '#')
+    source   = news.get('source', '')
+    content  = (news.get('content') or '')[:180].strip()
     if content:
         content += '...'
     ai_prompt = (
         f'Phân tích tác động của tin "{title[:60]}..." '
         f'đến cổ phiếu {symbol}. Tôi đang nắm giữ {quantity:,} cổ phiếu {symbol}.'
+    )
+
+    type_html = (
+        f'<td style="padding-left:6px;">'
+        f'<span style="background:#F0F0F8;color:#5A5A7A;font-size:10px;font-weight:600;'
+        f'padding:3px 8px;border-radius:20px;">{type_tag}</span></td>'
+        if type_tag else ''
     )
 
     return f"""
@@ -94,6 +113,7 @@ def _news_item_html(news: dict, symbol: str, quantity: int) -> str:
                   <table cellpadding="0" cellspacing="0" style="margin-bottom:10px;">
                     <tr>
                       <td style="background:{bg};color:{color};font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;">{badge}</td>
+                      {type_html}
                       <td style="padding-left:10px;color:#717182;font-size:11px;">{source}</td>
                     </tr>
                   </table>

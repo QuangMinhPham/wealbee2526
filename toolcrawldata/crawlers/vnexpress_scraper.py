@@ -30,7 +30,6 @@ DELAY       = 0.5
 
 CATEGORIES = [
     "https://vnexpress.net/kinh-doanh/chung-khoan",
-    "https://vnexpress.net/kinh-doanh",
 ]
 
 HEADERS = {
