@@ -155,6 +155,28 @@ def run_crawl() -> list[str]:
     except Exception as e:
         log.error(f'  Vietstock loi: {e}')
 
+    # Markettimes
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('markettimes_scraper', CRAWLERS_DIR / 'markettimes_scraper.py')
+        mod  = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        articles = mod.scrape_all_channels(lookback_days=1)
+        if articles:
+            articles = mod.enrich_content(articles)
+            new_articles = [
+                a for a in articles
+                if a.get('article_url') and a['article_url'] not in existing_urls
+            ]
+            mod.upsert_to_supabase(articles)
+            all_new_urls += [a['article_url'] for a in new_articles if a.get('article_url')]
+            log.info(f'  Markettimes: {len(articles)} crawl, {len(new_articles)} bai INSERT moi')
+        else:
+            log.warning('  Markettimes: khong co bai nao')
+    except Exception as e:
+        log.error(f'  Markettimes loi: {e}')
+
     all_new_urls = [u for u in all_new_urls if u]
     log.info(f'  Tong bai INSERT moi: {len(all_new_urls)}')
     return all_new_urls
