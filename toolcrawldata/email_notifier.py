@@ -42,10 +42,33 @@ logging.basicConfig(
 log = logging.getLogger('email_notifier')
 
 # ── Màu sắc theo label ────────────────────────────────────────────────────────
-LABEL_VI     = {'positive': 'TÍCH CỰC', 'negative': 'TIÊU CỰC', 'neutral': 'TRUNG LẬP'}
-LABEL_COLOR  = {'positive': '#2E7D32',  'negative': '#D4183D',  'neutral': '#F59E0B'}
-LABEL_BG     = {'positive': '#E8F5E9',  'negative': '#FDE8EC',  'neutral': '#FEF3C7'}
-LABEL_BORDER = {'positive': '#2E7D32',  'negative': '#D4183D',  'neutral': '#F59E0B'}
+LABEL_VI = {
+    'very_positive': 'RẤT TÍCH CỰC',
+    'positive':      'TÍCH CỰC',
+    'negative':      'TIÊU CỰC',
+    'very_negative': 'RẤT TIÊU CỰC',
+}
+LABEL_COLOR = {
+    'very_positive': '#1B5E20',
+    'positive':      '#2E7D32',
+    'negative':      '#D4183D',
+    'very_negative': '#7B0D1E',
+}
+LABEL_BG = {
+    'very_positive': '#C8E6C9',
+    'positive':      '#E8F5E9',
+    'negative':      '#FDE8EC',
+    'very_negative': '#F8D7DA',
+}
+LABEL_BORDER = {
+    'very_positive': '#1B5E20',
+    'positive':      '#2E7D32',
+    'negative':      '#D4183D',
+    'very_negative': '#7B0D1E',
+}
+
+# Nhãn được gửi email (neutral và trash bị loại)
+EMAIL_LABELS = ('very_positive', 'positive', 'negative', 'very_negative')
 
 # ── Tag loại tin ──────────────────────────────────────────────────────────────
 NEWS_TYPE_VI = {
@@ -70,10 +93,9 @@ def fetch_news_for_symbol(sb, symbol: str, since_date: str) -> list[dict]:
     # 1. Bài có symbol khớp trực tiếp
     r1 = (
         sb.table('market_news')
-        .select('id,title,content,article_url,label,source,published_at,news_type,affected_symbols,impact_reasoning')
+        .select('id,title,content,article_url,label,source,published_at,news_type,affected_symbols,impact_reasoning,impact_score')
         .eq('symbol', symbol)
-        .not_.is_('label', 'null')
-        .neq('label', 'trash')
+        .in_('label', list(EMAIL_LABELS))
         .gte('labeled_at', since_date)
         .order('published_at', desc=True)
         .limit(5)
@@ -87,10 +109,9 @@ def fetch_news_for_symbol(sb, symbol: str, since_date: str) -> list[dict]:
     if len(results) < 5:
         r2 = (
             sb.table('market_news')
-            .select('id,title,content,article_url,label,source,published_at,news_type,affected_symbols,impact_reasoning')
+            .select('id,title,content,article_url,label,source,published_at,news_type,affected_symbols,impact_reasoning,impact_score')
             .contains('affected_symbols', [symbol])
-            .not_.is_('label', 'null')
-            .neq('label', 'trash')
+            .in_('label', list(EMAIL_LABELS))
             .gte('labeled_at', since_date)
             .order('published_at', desc=True)
             .limit(5)
@@ -106,11 +127,11 @@ def fetch_news_for_symbol(sb, symbol: str, since_date: str) -> list[dict]:
 
 def _news_item_html(news: dict, symbol: str, quantity: int) -> str:
     import urllib.parse
-    label     = news.get('label', 'neutral')
-    color     = LABEL_COLOR.get(label, '#F59E0B')
-    bg        = LABEL_BG.get(label, '#FEF3C7')
-    border    = LABEL_BORDER.get(label, '#F59E0B')
-    badge     = LABEL_VI.get(label, 'TRUNG LẬP')
+    label     = news.get('label', 'positive')
+    color     = LABEL_COLOR.get(label, '#2E7D32')
+    bg        = LABEL_BG.get(label, '#E8F5E9')
+    border    = LABEL_BORDER.get(label, '#2E7D32')
+    badge     = LABEL_VI.get(label, label.upper())
     ntype     = news.get('news_type') or ''
     type_tag  = NEWS_TYPE_VI.get(ntype, '')
     title     = news.get('title', '')
