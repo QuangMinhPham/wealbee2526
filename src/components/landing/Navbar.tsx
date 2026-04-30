@@ -105,20 +105,20 @@ export function Navbar() {
             </svg>
           </button>
           <button
-            onClick={() => handleNavigate("/start")}
+            onClick={() => handleNavigate("/login")}
             className="bg-[#0849ac] text-white px-6 py-2.5 rounded-xl text-[16px] font-semibold hover:bg-[#063d8f] transition-colors"
           >
-            Bắt đầu
+            Đăng nhập
           </button>
         </div>
 
         {/* ── Mobile right side: CTA + Hamburger ── */}
         <div className="flex md:hidden items-center gap-2">
           <button
-            onClick={() => handleNavigate("/start")}
+            onClick={() => handleNavigate("/login")}
             className="bg-[#0849ac] text-white px-3 py-1.5 rounded-lg text-[13px] font-semibold hover:bg-[#063d8f] transition-colors whitespace-nowrap"
           >
-            Bắt đầu
+            Đăng nhập
           </button>
           <button
             onClick={() => setMobileOpen((prev) => !prev)}

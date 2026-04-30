@@ -16,6 +16,7 @@ import {
   CheckCircle2
 } from 'lucide-react';
 import { useAuth } from '../lib/auth-context';
+import { supabase } from '../lib/supabase/client';
 import { ThemeToggle } from '../components/theme-toggle';
 import wealbeeLogoUrl from '../assets/BRAND_NAME-logo-color.svg';
 
@@ -41,6 +42,11 @@ export function Login() {
       } else {
         if (!name.trim()) { setError('Vui lòng nhập họ tên'); return; }
         await register(email, password, name);
+        // Upsert vào bảng subscribers sau khi tạo tài khoản thành công
+        await supabase.from('subscribers').upsert(
+          { email, name },
+          { onConflict: 'email', ignoreDuplicates: true }
+        );
       }
       navigate(from, { replace: true });
     } catch (err: any) {
@@ -88,7 +94,7 @@ export function Login() {
           transition={{ duration: 0.5 }}
           className="text-center mb-8"
         >
-          <Link to="/landing" className="inline-flex items-center gap-3 mb-4">
+          <Link to="/" className="inline-flex items-center gap-3 mb-4">
             <img src={wealbeeLogoUrl} alt="Wealbee" className="h-9 dark:brightness-0 dark:invert" />
           </Link>
           <p className="text-slate-500 dark:text-slate-400 text-sm">
@@ -306,7 +312,7 @@ export function Login() {
           transition={{ delay: 0.5 }}
           className="text-center mt-6"
         >
-          <Link to="/landing" className="text-sm text-slate-400 dark:text-slate-400 hover:text-[#4980DF] dark:hover:text-white transition-colors">
+          <Link to="/" className="text-sm text-slate-400 dark:text-slate-400 hover:text-[#4980DF] dark:hover:text-white transition-colors">
             ← Quay lại trang chủ
           </Link>
         </motion.div>

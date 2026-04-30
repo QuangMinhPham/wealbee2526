@@ -61,7 +61,7 @@ function HeroSection() {
       {/* CTA Button */}
       <div className="flex flex-col items-center gap-3">
         <button
-          onClick={() => navigate("/start")}
+          onClick={() => navigate("/login")}
           className="bg-gradient-to-r from-[#0849ac] to-[#2563eb] text-white px-7 py-3.5 sm:px-8 sm:py-4 rounded-xl text-[16px] sm:text-[18px] font-semibold flex items-center gap-3 hover:opacity-90 transition-opacity shadow-[0px_4px_20px_rgba(8,73,172,0.3)]"
         >
           Bắt đầu miễn phí
@@ -1101,7 +1101,7 @@ function CTASection() {
           Bắt đầu miễn phí, nâng cấp bất cứ lúc nào.
         </p>
         <button
-          onClick={() => navigate("/start")}
+          onClick={() => navigate("/login")}
           className="bg-white text-[#032d6b] px-7 py-4 sm:px-8 sm:py-5 rounded-xl text-[16px] sm:text-[18px] font-bold flex items-center gap-3 mx-auto hover:bg-[#f0f4ff] transition-colors"
         >
           Bắt đầu miễn phí
