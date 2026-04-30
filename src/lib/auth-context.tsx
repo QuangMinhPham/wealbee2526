@@ -130,14 +130,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const register = async (email: string, password: string, name: string) => {
     setIsLoading(true);
-    
+
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
-        data: {
-          name,
-        },
+        data: { name },
         emailRedirectTo: `${window.location.origin}/app`,
       }
     });
@@ -147,17 +145,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw error;
     }
 
-    // Check if email confirmation is required
-    if (data.user && !data.session) {
-      // Email confirmation required
-      setIsLoading(false);
-      throw new Error('Vui lòng kiểm tra email để xác nhận tài khoản');
+    if (data.user && data.session) {
+      // Email confirmation tắt — có session ngay
+      setUser(convertSupabaseUser(data.user));
+    } else if (data.user && !data.session) {
+      // Email confirmation bật — tự signIn luôn bằng password vừa nhập
+      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+      if (signInError) {
+        // signIn thất bại (vd Supabase block unconfirmed) — báo lỗi thân thiện
+        setIsLoading(false);
+        throw new Error('Tài khoản đã được tạo. Vui lòng đăng nhập bằng email và mật khẩu vừa nhập.');
+      }
+      if (signInData.user) {
+        setUser(convertSupabaseUser(signInData.user));
+      }
     }
 
-    if (data.user) {
-      setUser(convertSupabaseUser(data.user));
-    }
-    
     setIsLoading(false);
   };
 
