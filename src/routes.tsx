@@ -20,6 +20,7 @@ import { InvestingGuides } from "./pages/investing-guides";
 import { TopStocks } from "./pages/top-stocks";
 import { DatabaseTest } from "./pages/database-test";
 import { PiAI } from "./pages/bee-ai";
+import { PortfolioNews } from "./pages/portfolio-news";
 import { NotFound } from "./pages/not-found";
 
 export const router = createBrowserRouter([
@@ -73,6 +74,7 @@ export const router = createBrowserRouter([
       { path: "markets", Component: MarketsDashboard },
       { path: "pi-ai", Component: PiAI },
       { path: "stock/:ticker", Component: StockDetail },
+      { path: "portfolio-news", Component: PortfolioNews },
       { path: "calculator", Component: DividendCalculator },
       { path: "compare", Component: Compare },
       { path: "my-goal", Component: MyGoal },

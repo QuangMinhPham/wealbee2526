@@ -36,6 +36,7 @@ const navItems: NavItem[] = [
     label: 'Công Cụ',
     icon: Calculator,
     children: [
+      { label: 'Bản Tin Danh Mục', path: '/app/portfolio-news' },
       { label: 'Máy Tính Đầu Tư', path: '/app/calculator' },
       { label: 'So Sánh Cổ Phiếu', path: '/app/compare' },
       { label: 'Sức Khỏe Danh Mục', path: '/app/my-goal' },
