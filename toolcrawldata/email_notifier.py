@@ -98,7 +98,7 @@ def fetch_news_for_symbol(sb, symbol: str, since_date: str) -> list[dict]:
         .in_('label', list(EMAIL_LABELS))
         .gte('labeled_at', since_date)
         .order('published_at', desc=True)
-        .limit(5)
+        .limit(20)
         .execute()
     )
     for row in (r1.data or []):
@@ -106,7 +106,7 @@ def fetch_news_for_symbol(sb, symbol: str, since_date: str) -> list[dict]:
         results.append(row)
 
     # 2. Bài LLM gán symbol vào affected_symbols (bài không có symbol trực tiếp)
-    if len(results) < 5:
+    if len(results) < 20:
         r2 = (
             sb.table('market_news')
             .select('id,title,content,article_url,label,source,published_at,news_type,affected_symbols,impact_reasoning,impact_score')
@@ -114,7 +114,7 @@ def fetch_news_for_symbol(sb, symbol: str, since_date: str) -> list[dict]:
             .in_('label', list(EMAIL_LABELS))
             .gte('labeled_at', since_date)
             .order('published_at', desc=True)
-            .limit(5)
+            .limit(20)
             .execute()
         )
         for row in (r2.data or []):
@@ -122,7 +122,9 @@ def fetch_news_for_symbol(sb, symbol: str, since_date: str) -> list[dict]:
                 seen_ids.add(row['id'])
                 results.append(row)
 
-    return results[:5]
+    # Sort theo |impact_score| giảm dần → bài tác động mạnh nhất lên đầu
+    results.sort(key=lambda x: abs(x.get('impact_score') or 0), reverse=True)
+    return results[:3]
 
 
 def _news_item_html(news: dict, symbol: str, quantity: int) -> str:
@@ -162,11 +164,23 @@ def _news_item_html(news: dict, symbol: str, quantity: int) -> str:
     )
     chatgpt_url = 'https://chatgpt.com/?q=' + urllib.parse.quote(deep_prompt)
 
+    detail_url = f'https://wealbee.vercel.app/app/stock/{symbol}'
     chatgpt_btn = f"""
-                        <a href="{chatgpt_url}" style="display:inline-flex;align-items:center;gap:6px;background:#000000;color:#ffffff;font-size:11px;font-weight:600;padding:7px 14px;border-radius:20px;text-decoration:none;margin-top:10px;">
-                          <img src="https://cdn.oaistatic.com/assets/favicon-o20kmmos.svg" width="13" height="13" style="vertical-align:middle;" alt=""/>
-                          Research sâu hơn
-                        </a>"""
+                        <table cellpadding="0" cellspacing="0" style="margin-top:10px;">
+                          <tr>
+                            <td style="padding-right:8px;">
+                              <a href="{chatgpt_url}" style="display:inline-flex;align-items:center;gap:6px;background:#000000;color:#ffffff;font-size:11px;font-weight:600;padding:7px 14px;border-radius:20px;text-decoration:none;">
+                                <img src="https://cdn.oaistatic.com/assets/favicon-o20kmmos.svg" width="13" height="13" style="vertical-align:middle;" alt=""/>
+                                Research sâu hơn
+                              </a>
+                            </td>
+                            <td>
+                              <a href="{detail_url}" style="display:inline-flex;align-items:center;gap:6px;background:#0849AC;color:#ffffff;font-size:11px;font-weight:600;padding:7px 14px;border-radius:20px;text-decoration:none;">
+                                Xem chi tiết →
+                              </a>
+                            </td>
+                          </tr>
+                        </table>"""
 
     # Phần AI Reasoning (nếu có) hoặc placeholder — layout column
     if reasoning:
