@@ -39,14 +39,25 @@ export function Login() {
     try {
       if (mode === 'login') {
         await login(email, password);
+        // Liên kết user_id vào subscribers nếu chưa có (account cũ subscribe qua /start)
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          await supabase.from('subscribers')
+            .update({ user_id: user.id })
+            .eq('email', email)
+            .is('user_id', null);
+        }
       } else {
         if (!name.trim()) { setError('Vui lòng nhập họ tên'); return; }
         await register(email, password, name);
-        // Upsert vào bảng subscribers sau khi tạo tài khoản thành công
-        await supabase.from('subscribers').upsert(
-          { email, name },
-          { onConflict: 'email', ignoreDuplicates: true }
-        );
+        // Lấy user vừa tạo để có uid, upsert subscribers với user_id
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          await supabase.from('subscribers').upsert(
+            { email, name, user_id: user.id },
+            { onConflict: 'email' }
+          );
+        }
       }
       navigate(from, { replace: true });
     } catch (err: any) {
