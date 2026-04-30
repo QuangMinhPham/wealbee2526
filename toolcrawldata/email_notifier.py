@@ -164,7 +164,7 @@ def _news_item_html(news: dict, symbol: str, quantity: int) -> str:
     )
     chatgpt_url = 'https://chatgpt.com/?q=' + urllib.parse.quote(deep_prompt)
 
-    detail_url = f'https://wealbee.vercel.app/app/stock/{symbol}'
+    detail_url = f'https://wealbee2526.vercel.app/app/stock/{symbol}'
     chatgpt_btn = f"""
                         <table cellpadding="0" cellspacing="0" style="margin-top:10px;">
                           <tr>
