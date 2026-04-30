@@ -18,15 +18,18 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 import time
 
-# Import shared Supabase writer từ thư mục toolcrawldata/
+# Import shared Supabase writer từ thư
+#  mục toolcrawldata/
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from supabase_writer import get_client, upsert_batch
 
 # ── Cấu hình ──────────────────────────────────────────────────────────────────
-START_DATE    = date.today() - timedelta(days=730)  # Lấy 2 năm gần nhất
-OUTPUT_FILE   = str(Path(__file__).parent / f"vietstock_news_{date.today().strftime('%m%Y')}.xlsx")
-MAX_PAGES     = 200                # Giới hạn trang an toàn
+LOOKBACK_HOURS = 24                # Chỉ lấy bài trong 24h gần nhất
+MAX_ARTICLES   = 250               # Tự dừng nếu vượt quá số này
+MAX_PAGES      = 50                # Giới hạn trang an toàn
 ITEMS_PER_PAGE = 15
+
+OUTPUT_FILE = str(Path(__file__).parent / f"vietstock_news_{date.today().strftime('%m%Y')}.xlsx")
 WORKERS       = 5                  # Số luồng song song khi tải nội dung
 CONTENT_DELAY = 0.3                # Giây chờ giữa mỗi request nội dung
 
@@ -57,7 +60,7 @@ _done = 0
 def parse_publish_time(ts_str: str) -> datetime | None:
     try:
         ms = int(ts_str.replace("/Date(", "").replace(")/", ""))
-        return datetime.utcfromtimestamp(ms / 1000)
+        return datetime.utcfromtimestamp(ms / 1000) + timedelta(hours=7)
     except Exception:
         return None
 
@@ -77,30 +80,32 @@ def fetch_article_list(session: requests.Session, page: int) -> dict | None:
         return None
 
 
-def scrape_article_list() -> list[dict]:
-    session = requests.Session()
+def scrape_article_list(lookback_hours: int = LOOKBACK_HOURS) -> list[dict]:
+    """
+    Lấy bài trong `lookback_hours` giờ gần nhất.
+    Tự dừng nếu đạt MAX_ARTICLES hoặc gặp bài cũ hơn ngưỡng.
+    """
+    cutoff   = datetime.now() - timedelta(hours=lookback_hours)
+    session  = requests.Session()
     articles = []
-    stop = False
 
-    print(f"{'='*55}")
-    print(f"  BƯỚC 1: Tải danh sách bài từ {START_DATE.strftime('%d/%m/%Y')}")
-    print(f"{'='*55}")
+    print(f"  Vietstock: lấy bài từ {cutoff.strftime('%d/%m/%Y %H:%M')} ({lookback_hours}h)")
 
     for page in range(1, MAX_PAGES + 1):
-        print(f"  Trang {page}...", end=" ", flush=True)
         data = fetch_article_list(session, page)
 
         if not data or data.get("Code") != 200 or not data.get("Data"):
-            print("Hết dữ liệu, dừng.")
+            print(f"  Vietstock: hết dữ liệu ở trang {page}, dừng.")
             break
 
-        count = 0
+        stop = False
         for art in data["Data"]:
             pub_time = parse_publish_time(art.get("PublishTime", ""))
             if not pub_time:
                 continue
-            if pub_time.date() < START_DATE:
-                print(f"\n  -> Gặp bài ngày {pub_time.date()}, dừng phân trang.")
+
+            # Dừng khi gặp bài cũ hơn ngưỡng 24h
+            if pub_time < cutoff:
                 stop = True
                 break
 
@@ -109,26 +114,31 @@ def scrape_article_list() -> list[dict]:
                 url = SITE_URL + url
 
             articles.append({
-                "Tiêu đề":      art.get("Title", "").strip(),
-                "Nội dung":     "",   # sẽ điền ở Bước 2
-                "Ngày đăng":    pub_time.strftime("%d/%m/%Y %H:%M"),
-                "Mã CK":        art.get("StockCode", ""),
-                "Tác giả":      art.get("By", ""),
-                "Giá đóng cửa": art.get("ClosePrice"),
-                "Thay đổi giá": art.get("Change"),
-                "% Thay đổi":   art.get("PerChange"),
+                "Tiêu đề":       art.get("Title", "").strip(),
+                "Nội dung":      "",
+                "Ngày đăng":     pub_time.strftime("%d/%m/%Y %H:%M"),
+                "Mã CK":         art.get("StockCode", ""),
+                "Tác giả":       art.get("By", ""),
+                "Giá đóng cửa":  art.get("ClosePrice"),
+                "Thay đổi giá":  art.get("Change"),
+                "% Thay đổi":    art.get("PerChange"),
                 "Link bài viết": url,
                 "Link tài chính": art.get("FinanceURL", ""),
-                "_ts": pub_time,
+                "_ts":           pub_time,
             })
-            count += 1
 
-        print(f"Thêm {count} bài (tổng: {len(articles)})")
+            # Giới hạn tối đa 250 bài
+            if len(articles) >= MAX_ARTICLES:
+                print(f"  Vietstock: đạt giới hạn {MAX_ARTICLES} bài, dừng.")
+                stop = True
+                break
+
+        print(f"  Vietstock trang {page}: +{len(data['Data'])} | tổng {len(articles)}")
         if stop:
             break
         time.sleep(0.8)
 
-    print(f"\n  -> Tổng {len(articles)} bài viết\n")
+    print(f"  Vietstock: {len(articles)} bài trong {lookback_hours}h\n")
     return articles
 
 
@@ -144,7 +154,8 @@ def fetch_content(row_idx: int, url: str) -> tuple[int, str]:
         resp.encoding = "utf-8"
         soup = BeautifulSoup(resp.text, "html.parser")
 
-        article = soup.select_one(".article-content")
+        article = (soup.select_one("#page-content")
+                   or soup.select_one(".article-content"))
         if not article:
             return row_idx, ""
 
@@ -318,7 +329,7 @@ def export_to_excel(articles: list[dict], output_path: str):  # noqa: C901
 
         # Summary sheet
         ws2 = writer.book.create_sheet("Thống kê")
-        ws2["A1"] = f"THỐNG KÊ TIN TỨC VIETSTOCK — TỪ {START_DATE.strftime('%d/%m/%Y')}"
+        ws2["A1"] = f"THỐNG KÊ TIN TỨC VIETSTOCK — {LOOKBACK_HOURS}h GẦN NHẤT"
         ws2["A1"].font = Font(bold=True, size=13, color="1F3864")
         ws2.merge_cells("A1:D1")
         ws2["A1"].alignment = Alignment(horizontal="center")

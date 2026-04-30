@@ -60,7 +60,7 @@ def parse_ms_timestamp(ts_str: str) -> datetime | None:
     try:
         m = re.search(r'/Date\((\d+)', str(ts_str))
         if m:
-            return datetime.utcfromtimestamp(int(m.group(1)) / 1000)
+            return datetime.utcfromtimestamp(int(m.group(1)) / 1000) + timedelta(hours=7)
     except Exception:
         pass
     return None
@@ -107,7 +107,7 @@ def parse_html_articles(html: str, cutoff: date) -> tuple[list[dict], int]:
             "content":      "",
             "source":       "markettimes",
             "article_url":  href,
-            "published_at": datetime.utcnow(),  # HTML listing không có timestamp chính xác
+            "published_at": datetime.now(),  # HTML listing không có timestamp chính xác
             "_pid":         pid,
         })
 

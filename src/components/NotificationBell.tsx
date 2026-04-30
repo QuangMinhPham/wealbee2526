@@ -369,6 +369,17 @@ export function NotificationBell() {
                             <Sparkles className="w-3.5 h-3.5" />
                             Phân tích với Bee AI
                           </button>
+                          {n.aiPrompt && (
+                            <a
+                              href={`https://chatgpt.com/?q=${encodeURIComponent(n.aiPrompt)}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={e => { e.stopPropagation(); markRead(n.id); setIsOpen(false); }}
+                              className="flex items-center justify-center gap-1.5 px-3 py-2.5 bg-[#10a37f] hover:bg-[#0d8c6d] text-white text-xs font-semibold rounded-xl transition-all"
+                            >
+                              ChatGPT
+                            </a>
+                          )}
                           {n.ticker && (
                             <button
                               onClick={e => {
