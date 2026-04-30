@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { Link } from 'react-router';
-import { PieChart, DollarSign, TrendingUp, Calendar, Plus, Settings, Eye, EyeOff, Trash2, Loader2 } from 'lucide-react';
+import { PieChart, DollarSign, TrendingUp, Calendar, Plus, Settings, Eye, EyeOff, Trash2, Loader2, Bell } from 'lucide-react';
+import { NewsletterSetupModal } from '../components/NewsletterSetupModal';
 import { PortfolioSummary } from '../lib/types';
 import { formatVND, formatPercent, getSafetyColorByScore, getSafetyLabelByScore } from '../lib/utils';
 import { PieChart as RechartsPie, Pie, Cell, ResponsiveContainer, Tooltip, Legend, AreaChart, Area, XAxis, YAxis, CartesianGrid } from 'recharts';
@@ -406,6 +407,8 @@ export function UserDashboard() {
   }, []);
 
   const [isCreatingPortfolio, setIsCreatingPortfolio] = useState(false);
+  const [showNewsletterModal, setShowNewsletterModal] = useState(false);
+  const [subscriberHoldings, setSubscriberHoldings] = useState<any[] | null>(null);
 
   // Tạo danh mục mặc định rồi chuyển sang tab "Thêm tài sản"
   const handleCreateFirstPortfolio = async () => {
@@ -441,6 +444,22 @@ export function UserDashboard() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // Kiểm tra subscriber holdings để hiện banner nếu chưa thiết lập
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) return;
+      supabase
+        .from('subscribers')
+        .select('holdings')
+        .eq('email', user.email!)
+        .maybeSingle()
+        .then(({ data }) => {
+          const h = data?.holdings ?? [];
+          setSubscriberHoldings(Array.isArray(h) ? h : []);
+        });
+    });
+  }, []);
 
   // Delete holding — routes to correct table based on assetType
   const handleDeleteHolding = async (holdingId: string) => {
@@ -632,6 +651,38 @@ export function UserDashboard() {
             Thử lại
           </button>
         </div>
+      )}
+
+      {/* Newsletter banner — hiện khi subscriber chưa có holdings */}
+      {!isLoading && subscriberHoldings !== null && subscriberHoldings.length === 0 && (
+        <div className="bg-gradient-to-r from-[#0849ac] to-[#2563eb] rounded-xl px-5 py-4 flex items-center justify-between gap-4 shadow-md">
+          <div className="flex items-center gap-3">
+            <div className="bg-white/20 rounded-lg p-2 flex-shrink-0">
+              <Bell className="size-5 text-white" />
+            </div>
+            <div>
+              <p className="text-white font-semibold text-[14px]">Bạn chưa thiết lập nhận bản tin hàng ngày</p>
+              <p className="text-blue-100 text-[12px] mt-0.5">Thêm danh mục cổ phiếu để nhận email phân tích tin tức mỗi sáng</p>
+            </div>
+          </div>
+          <button
+            onClick={() => setShowNewsletterModal(true)}
+            className="bg-white text-[#0849ac] px-4 py-2 rounded-lg text-[13px] font-semibold hover:bg-blue-50 transition-colors whitespace-nowrap flex-shrink-0"
+          >
+            Thiết lập ngay →
+          </button>
+        </div>
+      )}
+
+      {/* Newsletter Setup Modal */}
+      {showNewsletterModal && (
+        <NewsletterSetupModal
+          onClose={() => setShowNewsletterModal(false)}
+          onSuccess={() => {
+            setShowNewsletterModal(false);
+            setSubscriberHoldings([{ placeholder: true }]); // ẩn banner sau khi lưu
+          }}
+        />
       )}
 
       {/* Empty State - No Portfolio */}
