@@ -212,6 +212,8 @@ def run_label_and_score(new_urls: list[str]) -> int:
 Gán "trash": true nếu thuộc BẤT KỲ điều kiện nào:
 - Nội dung rỗng, quá ngắn, chỉ có link/file đính kèm
 - Thông báo hành chính thuần túy không có số liệu mới (giải trình, đính chính)
+- Thông báo sự kiện DN (ngày ĐKCC, chốt quyền cổ tức, ĐHCĐ) mà KHÔNG có số liệu
+  cụ thể: tỷ lệ cổ tức, số tiền/cổ phiếu, ngày thanh toán, chương trình nghị sự
 - Quảng cáo, advertorial, PR không có thông tin mới
 - Tin chỉ tóm tắt lại bài cũ, không có sự kiện mới phát sinh
 - Tin quốc tế không có liên hệ rõ ràng đến Việt Nam
@@ -298,8 +300,10 @@ Nếu không trash:
         def process_one(article):
             content = (article.get('content') or '').strip()
 
-            # Pre-filter: content < 50 ký tự → trash ngay, không gọi API
-            if len(content) < 50:
+            # Pre-filter: content < 150 ký tự → trash ngay, không gọi API
+            # Bắt cả 2 loại: bài PDF thuần (0 ký tự) và bài chỉ có đoạn mở đầu
+            # không có số liệu (thông báo ĐKCC, chốt quyền cổ tức, v.v.)
+            if len(content) < 150:
                 return article['id'], {
                     'label': 'trash', 'news_type': None,
                     'affected_symbols': None, 'impact_score': None,

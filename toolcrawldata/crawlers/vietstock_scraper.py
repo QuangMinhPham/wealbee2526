@@ -225,7 +225,7 @@ def upsert_news_to_supabase(articles: list[dict]) -> None:
 
         # Lọc bài không có nội dung (chỉ PDF đính kèm, thông báo rỗng...)
         content = a.get("Nội dung") or ""
-        if len(content.strip()) < 50:
+        if len(content.strip()) < 150:
             skipped += 1
             continue
 
