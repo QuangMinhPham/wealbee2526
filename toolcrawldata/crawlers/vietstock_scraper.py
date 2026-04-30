@@ -212,6 +212,7 @@ def upsert_news_to_supabase(articles: list[dict]) -> None:
 
     records = []
     seen_urls = set()
+    skipped = 0
     for a in articles:
         url = a.get("Link bài viết") or None
         # Normalize fili.vn → vietstock.vn (cùng domain, tránh trùng bài)
@@ -221,6 +222,13 @@ def upsert_news_to_supabase(articles: list[dict]) -> None:
             continue
         if url:
             seen_urls.add(url)
+
+        # Lọc bài không có nội dung (chỉ PDF đính kèm, thông báo rỗng...)
+        content = a.get("Nội dung") or ""
+        if len(content.strip()) < 50:
+            skipped += 1
+            continue
+
         pub_ts = a.get("_ts")
         records.append({
             "symbol":           a.get("Mã CK") or None,
@@ -237,7 +245,7 @@ def upsert_news_to_supabase(articles: list[dict]) -> None:
         })
 
     print(f"{'='*55}")
-    print(f"  BƯỚC 3b: Upsert {len(records)} bài lên Supabase")
+    print(f"  BƯỚC 3b: Upsert {len(records)} bài lên Supabase (bỏ qua {skipped} bài content rỗng)")
     print(f"{'='*55}")
 
     try:
