@@ -109,7 +109,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: `${window.location.origin}/app`,
+        redirectTo: `https://wealbee2526.vercel.app/app`,
       }
     });
 
@@ -127,7 +127,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'facebook',
       options: {
-        redirectTo: `${window.location.origin}/app`,
+        redirectTo: `https://wealbee2526.vercel.app/app`,
       }
     });
 
@@ -149,7 +149,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         data: {
           name,
         },
-        emailRedirectTo: `${window.location.origin}/app`,
+        emailRedirectTo: `https://wealbee2526.vercel.app/app`,
       }
     });
 
