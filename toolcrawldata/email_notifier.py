@@ -164,13 +164,23 @@ def _news_item_html(news: dict, symbol: str, quantity: int) -> str:
     )
     chatgpt_url = 'https://chatgpt.com/?q=' + urllib.parse.quote(deep_prompt)
 
+    detail_url = f'https://wealbee2526.vercel.app/app/stock/{symbol}'
     chatgpt_btn = f"""
-                        <div style="margin-top:10px;">
-                          <a href="{chatgpt_url}" style="display:inline-flex;align-items:center;gap:6px;background:#000000;color:#ffffff;font-size:11px;font-weight:600;padding:7px 14px;border-radius:20px;text-decoration:none;">
-                            <img src="https://cdn.oaistatic.com/assets/favicon-o20kmmos.svg" width="13" height="13" style="vertical-align:middle;" alt=""/>
-                            Research sâu hơn
-                          </a>
-                        </div>"""
+                        <table cellpadding="0" cellspacing="0" style="margin-top:10px;">
+                          <tr>
+                            <td style="padding-right:8px;">
+                              <a href="{chatgpt_url}" style="display:inline-flex;align-items:center;gap:6px;background:#000000;color:#ffffff;font-size:11px;font-weight:600;padding:7px 14px;border-radius:20px;text-decoration:none;">
+                                <img src="https://cdn.oaistatic.com/assets/favicon-o20kmmos.svg" width="13" height="13" style="vertical-align:middle;" alt=""/>
+                                Research sâu hơn
+                              </a>
+                            </td>
+                            <td>
+                              <a href="{detail_url}" style="display:inline-flex;align-items:center;gap:6px;background:#0849AC;color:#ffffff;font-size:11px;font-weight:600;padding:7px 14px;border-radius:20px;text-decoration:none;">
+                                Xem chi tiết →
+                              </a>
+                            </td>
+                          </tr>
+                        </table>"""
 
     # Phần AI Reasoning (nếu có) hoặc placeholder — layout column
     if reasoning:
