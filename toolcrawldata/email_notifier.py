@@ -127,8 +127,7 @@ def fetch_news_for_symbol(sb, symbol: str, since_date: str) -> list[dict]:
     return results[:3]
 
 
-def _news_item_html(news: dict, symbol: str, quantity: int) -> str:
-    import urllib.parse
+def _news_item_html(news: dict) -> str:
     label     = news.get('label', 'positive')
     color     = LABEL_COLOR.get(label, '#2E7D32')
     bg        = LABEL_BG.get(label, '#E8F5E9')
@@ -151,36 +150,13 @@ def _news_item_html(news: dict, symbol: str, quantity: int) -> str:
         if type_tag else ''
     )
 
-    # Nút mở ChatGPT với prompt research sẵn (ChatGPT hỗ trợ paste nội dung vào box chat)
-    deep_prompt = (
-        f'Tóm tắt bài báo: {url}\n'
-        f'Phân tích tác động của tin này lên cổ phiếu {symbol}.\n'
-        f'Bạn hãy research các thông tin cần thiết liên quan để tự cung cấp đủ context nhằm phân tích tin tức và cho tôi biết:\n'
-        f'- Tin ảnh hưởng trực tiếp hay gián tiếp?\n'
-        f'- Mức độ tác động (mạnh / vừa / yếu)\n'
-        f'- Ngắn hạn vs dài hạn\n'
-        f'- Thị trường đã phản ánh chưa?\n'
-        f'- Kết luận: bullish hay bearish (kèm reasoning)'
-    )
-    chatgpt_url = 'https://chatgpt.com/?q=' + urllib.parse.quote(deep_prompt)
-
     detail_url = 'https://wealbee2526.vercel.app/app/portfolio-news'
     chatgpt_btn = f"""
-                        <table cellpadding="0" cellspacing="0" style="margin-top:10px;">
-                          <tr>
-                            <td style="padding-right:8px;">
-                              <a href="{chatgpt_url}" style="display:inline-flex;align-items:center;gap:6px;background:#000000;color:#ffffff;font-size:11px;font-weight:600;padding:7px 14px;border-radius:20px;text-decoration:none;">
-                                <img src="https://cdn.oaistatic.com/assets/favicon-o20kmmos.svg" width="13" height="13" style="vertical-align:middle;" alt=""/>
-                                Research sâu hơn
-                              </a>
-                            </td>
-                            <td>
-                              <a href="{detail_url}" style="display:inline-flex;align-items:center;gap:6px;background:#0849AC;color:#ffffff;font-size:11px;font-weight:600;padding:7px 14px;border-radius:20px;text-decoration:none;">
-                                Xem chi tiết →
-                              </a>
-                            </td>
-                          </tr>
-                        </table>"""
+                        <div style="margin-top:10px;">
+                          <a href="{detail_url}" style="display:inline-flex;align-items:center;gap:6px;background:#0849AC;color:#ffffff;font-size:11px;font-weight:600;padding:7px 14px;border-radius:20px;text-decoration:none;">
+                            Xem chi tiết →
+                          </a>
+                        </div>"""
 
     # Phần AI Reasoning (nếu có) hoặc placeholder — layout column
     if reasoning:
@@ -247,7 +223,7 @@ def build_email_html(email: str, holdings: list[dict], news_by_symbol: dict) -> 
         if not news_list:
             continue
 
-        news_rows = ''.join(_news_item_html(n, symbol, quantity) for n in news_list)
+        news_rows = ''.join(_news_item_html(n) for n in news_list)
         holding_blocks += f"""
         <tr>
           <td style="background:#ffffff;padding:20px 32px 8px;">

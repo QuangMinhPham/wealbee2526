@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router';
 import { ChevronDown, ChevronRight, ExternalLink, Newspaper, Loader2, RefreshCw } from 'lucide-react';
 import { supabase } from '../lib/supabase/client';
@@ -26,6 +26,13 @@ interface SymbolNews {
   news: NewsItem[];
 }
 
+// Module-level cache — survives tab switches
+const cache: { data: SymbolNews[]; days: number; updatedAt: Date | null } = {
+  data: [],
+  days: 7,
+  updatedAt: null,
+};
+
 const LABEL_VI: Record<string, string> = {
   very_positive: 'RẤT TÍCH CỰC',
   positive: 'TÍCH CỰC',
@@ -51,12 +58,17 @@ const NEWS_TYPE_VI: Record<string, string> = {
 
 const EMAIL_LABELS = ['very_positive', 'positive', 'negative', 'very_negative'];
 
-async function fetchNewsForSymbol(symbol: string): Promise<NewsItem[]> {
+const DAY_OPTIONS = [
+  { label: 'Hôm qua', value: 1 },
+  { label: '3 ngày', value: 3 },
+  { label: '7 ngày', value: 7 },
+  { label: '15 ngày', value: 15 },
+];
+
+async function fetchNewsForSymbol(symbol: string, days: number): Promise<NewsItem[]> {
   const seen = new Set<string>();
   const results: NewsItem[] = [];
-
-  const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
   const fields = 'id,title,content,article_url,label,source,published_at,news_type,affected_symbols,impact_reasoning,impact_score';
 
   const r1 = await db.from('market_news')
@@ -91,26 +103,17 @@ async function fetchNewsForSymbol(symbol: string): Promise<NewsItem[]> {
   return results;
 }
 
-function NewsCard({ news, symbol }: { news: NewsItem; symbol: string }) {
+function NewsCard({ news }: { news: NewsItem }) {
   const label = news.label || 'positive';
   const styles = LABEL_STYLES[label] || LABEL_STYLES.positive;
   const badgeText = LABEL_VI[label] || label.toUpperCase();
   const typeTag = news.news_type ? NEWS_TYPE_VI[news.news_type] || news.news_type : null;
-  const content = news.content ? news.content.slice(0, 220).trim() + '...' : null;
-
-  const deepPrompt = encodeURIComponent(
-    `Tóm tắt bài báo: ${news.article_url}\nPhân tích tác động của tin này lên cổ phiếu ${symbol}.\n` +
-    `Bạn hãy research các thông tin cần thiết liên quan để tự cung cấp đủ context nhằm phân tích tin tức và cho tôi biết:\n` +
-    `- Tin ảnh hưởng trực tiếp hay gián tiếp?\n- Mức độ tác động (mạnh / vừa / yếu)\n` +
-    `- Ngắn hạn vs dài hạn\n- Thị trường đã phản ánh chưa?\n- Kết luận: bullish hay bearish (kèm reasoning)`
-  );
-  const chatgptUrl = `https://chatgpt.com/?q=${deepPrompt}`;
+  const content = news.content ? news.content.slice(0, 280).trim() + '...' : null;
 
   return (
     <div className={`rounded-xl border-l-4 ${styles.border} ${styles.bg} dark:bg-slate-800/50 border border-gray-100 dark:border-slate-700 p-4`}>
-      {/* Badges */}
       <div className="flex items-center gap-2 flex-wrap mb-3">
-        <span className={`text-[11px] font-700 font-bold px-2.5 py-0.5 rounded-full ${styles.badge}`}>{badgeText}</span>
+        <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full ${styles.badge}`}>{badgeText}</span>
         {typeTag && (
           <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">{typeTag}</span>
         )}
@@ -122,7 +125,6 @@ function NewsCard({ news, symbol }: { news: NewsItem; symbol: string }) {
         </span>
       </div>
 
-      {/* Title */}
       <a
         href={news.article_url}
         target="_blank"
@@ -132,44 +134,31 @@ function NewsCard({ news, symbol }: { news: NewsItem; symbol: string }) {
         {news.title}
       </a>
 
-      {/* Content */}
       {content && (
         <p className="text-[13px] text-gray-500 dark:text-slate-400 leading-relaxed mb-3">{content}</p>
       )}
 
-      {/* AI Reasoning */}
       {news.impact_reasoning && (
-        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 rounded-lg px-3 py-2.5 mb-3">
+        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 rounded-lg px-3 py-2.5">
           <p className="text-[11px] font-bold text-[#0849ac] dark:text-blue-400 uppercase tracking-wide mb-1">AI Reasoning</p>
           <p className="text-[12px] text-gray-600 dark:text-slate-300 leading-relaxed">{news.impact_reasoning}</p>
         </div>
       )}
-
-      {/* Research button */}
-      <a
-        href={chatgptUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="inline-flex items-center gap-1.5 bg-black text-white text-[11px] font-semibold px-3.5 py-1.5 rounded-full hover:opacity-80 transition-opacity"
-      >
-        <img src="https://cdn.oaistatic.com/assets/favicon-o20kmmos.svg" width={12} height={12} alt="" />
-        Research sâu hơn
-      </a>
     </div>
   );
 }
 
-function SymbolSection({ item, defaultOpen }: { item: SymbolNews; defaultOpen: boolean }) {
+function SymbolSection({ item, defaultOpen, days }: { item: SymbolNews; defaultOpen: boolean; days: number }) {
   const [open, setOpen] = useState(defaultOpen);
   const positiveCount = item.news.filter(n => n.label.includes('positive')).length;
   const negativeCount = item.news.filter(n => n.label.includes('negative')).length;
+  const dayLabel = DAY_OPTIONS.find(o => o.value === days)?.label || `${days} ngày`;
 
   return (
     <div className="border border-gray-200 dark:border-slate-700 rounded-xl overflow-hidden">
-      {/* Header — click to toggle */}
       <button
         onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center gap-3 px-4 py-3 bg-white dark:bg-slate-800 hover:bg-gray-50 dark:hover:bg-slate-750 transition-colors text-left"
+        className="w-full flex items-center gap-3 px-4 py-3 bg-white dark:bg-slate-800 hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors text-left"
       >
         <span className="text-gray-400 dark:text-slate-500">
           {open ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
@@ -177,7 +166,6 @@ function SymbolSection({ item, defaultOpen }: { item: SymbolNews; defaultOpen: b
         <span className="text-[15px] font-bold text-gray-900 dark:text-white">{item.symbol}</span>
         <span className="text-[12px] text-gray-400 dark:text-slate-500">{item.quantity.toLocaleString()} cp</span>
 
-        {/* Tin tức counts */}
         <div className="flex items-center gap-1.5 ml-1">
           {positiveCount > 0 && (
             <span className="text-[11px] font-semibold bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 px-2 py-0.5 rounded-full">
@@ -194,7 +182,6 @@ function SymbolSection({ item, defaultOpen }: { item: SymbolNews; defaultOpen: b
           )}
         </div>
 
-        {/* Xem chi tiết link */}
         <Link
           to={`/app/stock/${item.symbol}`}
           onClick={e => e.stopPropagation()}
@@ -205,20 +192,17 @@ function SymbolSection({ item, defaultOpen }: { item: SymbolNews; defaultOpen: b
         </Link>
       </button>
 
-      {/* News list */}
       {open && item.news.length > 0 && (
-        <div className="divide-y divide-gray-100 dark:divide-slate-700 bg-gray-50/50 dark:bg-slate-900/30 px-4 py-3 space-y-3">
+        <div className="bg-gray-50/50 dark:bg-slate-900/30 px-4 py-3 space-y-3">
           {item.news.map(n => (
-            <div key={n.id} className="pt-3 first:pt-0">
-              <NewsCard news={n} symbol={item.symbol} />
-            </div>
+            <NewsCard key={n.id} news={n} />
           ))}
         </div>
       )}
 
       {open && item.news.length === 0 && (
         <div className="px-4 py-6 text-center text-[13px] text-gray-400 dark:text-slate-500 bg-gray-50/50 dark:bg-slate-900/30">
-          Không có tin tức đáng chú ý trong 7 ngày qua
+          Không có tin tức đáng chú ý trong {dayLabel.toLowerCase()}
         </div>
       )}
     </div>
@@ -227,17 +211,19 @@ function SymbolSection({ item, defaultOpen }: { item: SymbolNews; defaultOpen: b
 
 export function PortfolioNews() {
   const { user } = useAuth();
-  const [data, setData] = useState<SymbolNews[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<SymbolNews[]>(cache.data);
+  const [loading, setLoading] = useState(cache.data.length === 0);
   const [error, setError] = useState('');
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(cache.updatedAt);
+  const [days, setDays] = useState(cache.days);
+  const loadedDaysRef = useRef<number | null>(cache.data.length > 0 ? cache.days : null);
 
-  const load = async () => {
+  const load = async (d: number, force = false) => {
     if (!user) return;
+    if (!force && loadedDaysRef.current === d && cache.data.length > 0) return;
     setLoading(true);
     setError('');
     try {
-      // Lấy holdings từ subscribers
       const { data: sub } = await db.from('subscribers')
         .select('holdings')
         .eq('email', user.email)
@@ -246,29 +232,35 @@ export function PortfolioNews() {
       const holdings: { symbol: string; quantity: number }[] = sub?.holdings || [];
 
       if (holdings.length === 0) {
+        cache.data = [];
+        cache.days = d;
+        cache.updatedAt = new Date();
         setData([]);
         setLoading(false);
         return;
       }
 
-      // Fetch news song song cho tất cả symbols
       const results = await Promise.all(
         holdings.map(async (h) => ({
           symbol: h.symbol,
           quantity: h.quantity,
-          news: await fetchNewsForSymbol(h.symbol),
+          news: await fetchNewsForSymbol(h.symbol, d),
         }))
       );
 
-      // Sort: symbol có tin tiêu cực/tích cực mạnh lên đầu
       results.sort((a, b) => {
         const scoreA = a.news.reduce((s, n) => s + Math.abs(n.impact_score || 0), 0);
         const scoreB = b.news.reduce((s, n) => s + Math.abs(n.impact_score || 0), 0);
         return scoreB - scoreA;
       });
 
+      cache.data = results;
+      cache.days = d;
+      cache.updatedAt = new Date();
+      loadedDaysRef.current = d;
+
       setData(results);
-      setLastUpdated(new Date());
+      setLastUpdated(cache.updatedAt);
     } catch (e: any) {
       setError(e.message || 'Lỗi tải dữ liệu');
     } finally {
@@ -276,33 +268,57 @@ export function PortfolioNews() {
     }
   };
 
-  useEffect(() => { load(); }, [user]);
+  useEffect(() => { load(days); }, [user]);
+
+  const handleDaysChange = (d: number) => {
+    setDays(d);
+    load(d);
+  };
 
   const totalNews = data.reduce((s, d) => s + d.news.length, 0);
 
   return (
-    <div className="p-6 max-w-3xl mx-auto">
+    <div className="p-6 max-w-5xl mx-auto">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-start justify-between mb-5 gap-4 flex-wrap">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-[#0849ac]/10 dark:bg-[#0849ac]/20 flex items-center justify-center">
+          <div className="w-9 h-9 rounded-xl bg-[#0849ac]/10 dark:bg-[#0849ac]/20 flex items-center justify-center shrink-0">
             <Newspaper className="size-5 text-[#0849ac] dark:text-blue-400" />
           </div>
           <div>
             <h1 className="text-[18px] font-bold text-gray-900 dark:text-white">Bản Tin Danh Mục</h1>
             <p className="text-[12px] text-gray-400 dark:text-slate-500">
-              Tin tức ảnh hưởng đến các mã bạn theo dõi · 7 ngày gần nhất
+              Tin tức ảnh hưởng đến các mã bạn theo dõi
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Day filter */}
+          <div className="flex items-center gap-1 bg-gray-100 dark:bg-slate-800 rounded-lg p-1">
+            {DAY_OPTIONS.map(opt => (
+              <button
+                key={opt.value}
+                onClick={() => handleDaysChange(opt.value)}
+                disabled={loading}
+                className={`px-3 py-1.5 rounded-md text-[12px] font-semibold transition-all disabled:opacity-50 ${
+                  days === opt.value
+                    ? 'bg-white dark:bg-slate-700 text-[#0849ac] dark:text-blue-400 shadow-sm'
+                    : 'text-gray-500 dark:text-slate-400 hover:text-gray-700 dark:hover:text-slate-200'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+
           {lastUpdated && (
             <span className="text-[11px] text-gray-400 dark:text-slate-500 hidden sm:block">
-              Cập nhật {lastUpdated.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
+              {lastUpdated.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
             </span>
           )}
           <button
-            onClick={load}
+            onClick={() => load(days, true)}
             disabled={loading}
             className="p-2 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-lg transition-colors text-gray-500 dark:text-slate-400 disabled:opacity-40"
           >
@@ -326,7 +342,7 @@ export function PortfolioNews() {
         </div>
       )}
 
-      {/* Empty — no holdings */}
+      {/* Empty */}
       {!loading && !error && data.length === 0 && (
         <div className="text-center py-16">
           <Newspaper className="size-10 text-gray-300 dark:text-slate-600 mx-auto mb-3" />
@@ -338,9 +354,9 @@ export function PortfolioNews() {
         </div>
       )}
 
-      {/* Stats bar */}
+      {/* Stats */}
       {!loading && !error && data.length > 0 && (
-        <div className="flex items-center gap-4 mb-4 px-1">
+        <div className="flex items-center gap-2 mb-4 px-1">
           <span className="text-[13px] text-gray-500 dark:text-slate-400">
             <span className="font-semibold text-gray-900 dark:text-white">{data.length}</span> mã ·{' '}
             <span className="font-semibold text-gray-900 dark:text-white">{totalNews}</span> tin tức
@@ -352,7 +368,7 @@ export function PortfolioNews() {
       {!loading && !error && data.length > 0 && (
         <div className="space-y-3">
           {data.map((item, i) => (
-            <SymbolSection key={item.symbol} item={item} defaultOpen={i === 0} />
+            <SymbolSection key={item.symbol} item={item} defaultOpen={i === 0} days={days} />
           ))}
         </div>
       )}
