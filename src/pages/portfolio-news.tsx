@@ -103,12 +103,24 @@ async function fetchNewsForSymbol(symbol: string, days: number): Promise<NewsIte
   return results;
 }
 
-function NewsCard({ news }: { news: NewsItem }) {
+function NewsCard({ news, symbol }: { news: NewsItem; symbol: string }) {
   const label = news.label || 'positive';
   const styles = LABEL_STYLES[label] || LABEL_STYLES.positive;
   const badgeText = LABEL_VI[label] || label.toUpperCase();
   const typeTag = news.news_type ? NEWS_TYPE_VI[news.news_type] || news.news_type : null;
   const content = news.content ? news.content.slice(0, 280).trim() + '...' : null;
+
+  const deepPrompt = encodeURIComponent(
+    `Tóm tắt bài báo: ${news.article_url}\n` +
+    `Phân tích tác động của tin này lên cổ phiếu ${symbol}.\n` +
+    `Bạn hãy research các thông tin cần thiết liên quan để tự cung cấp đủ context nhằm phân tích tin tức và cho tôi biết:\n` +
+    `- Tin ảnh hưởng trực tiếp hay gián tiếp?\n` +
+    `- Mức độ tác động (mạnh / vừa / yếu)\n` +
+    `- Ngắn hạn vs dài hạn\n` +
+    `- Thị trường đã phản ánh chưa?\n` +
+    `- Kết luận: bullish hay bearish (kèm reasoning)`
+  );
+  const chatgptUrl = `https://chatgpt.com/?q=${deepPrompt}`;
 
   return (
     <div className={`rounded-xl border-l-4 ${styles.border} ${styles.bg} dark:bg-slate-800/50 border border-gray-100 dark:border-slate-700 p-4`}>
@@ -139,11 +151,21 @@ function NewsCard({ news }: { news: NewsItem }) {
       )}
 
       {news.impact_reasoning && (
-        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 rounded-lg px-3 py-2.5">
+        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 rounded-lg px-3 py-2.5 mb-3">
           <p className="text-[11px] font-bold text-[#0849ac] dark:text-blue-400 uppercase tracking-wide mb-1">AI Reasoning</p>
           <p className="text-[12px] text-gray-600 dark:text-slate-300 leading-relaxed">{news.impact_reasoning}</p>
         </div>
       )}
+
+      <a
+        href={chatgptUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-flex items-center gap-1.5 bg-black text-white text-[11px] font-semibold px-3.5 py-1.5 rounded-full hover:opacity-80 transition-opacity"
+      >
+        <img src="https://cdn.oaistatic.com/assets/favicon-o20kmmos.svg" width={12} height={12} alt="" />
+        Research sâu hơn
+      </a>
     </div>
   );
 }
@@ -195,7 +217,7 @@ function SymbolSection({ item, defaultOpen, days }: { item: SymbolNews; defaultO
       {open && item.news.length > 0 && (
         <div className="bg-gray-50/50 dark:bg-slate-900/30 px-4 py-3 space-y-3">
           {item.news.map(n => (
-            <NewsCard key={n.id} news={n} />
+            <NewsCard key={n.id} news={n} symbol={item.symbol} />
           ))}
         </div>
       )}
