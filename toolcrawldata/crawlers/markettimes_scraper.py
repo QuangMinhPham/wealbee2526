@@ -60,7 +60,7 @@ def parse_ms_timestamp(ts_str: str) -> datetime | None:
     try:
         m = re.search(r'/Date\((\d+)', str(ts_str))
         if m:
-            return datetime.utcfromtimestamp(int(m.group(1)) / 1000)
+            return datetime.utcfromtimestamp(int(m.group(1)) / 1000) + timedelta(hours=7)
     except Exception:
         pass
     return None
@@ -107,7 +107,7 @@ def parse_html_articles(html: str, cutoff: date) -> tuple[list[dict], int]:
             "content":      "",
             "source":       "markettimes",
             "article_url":  href,
-            "published_at": datetime.utcnow(),  # HTML listing không có timestamp chính xác
+            "published_at": datetime.now(),  # HTML listing không có timestamp chính xác
             "_pid":         pid,
         })
 
@@ -237,40 +237,72 @@ def scrape_all_channels(lookback_days: int = LOOKBACK_DAYS) -> list[dict]:
 
 # ── Bước 2: Enrich nội dung đầy đủ ───────────────────────────────────────────
 
-def fetch_content(idx: int, url: str) -> tuple[int, str]:
+def parse_published_at(soup) -> datetime | None:
+    """Parse ngày đăng thực từ trang bài viết."""
+    meta = soup.select_one('meta[property="article:published_time"]')
+    if meta and meta.get("content"):
+        val = meta["content"].strip()
+        # ISO format: 2026-05-03T00:01:00
+        try:
+            return datetime.fromisoformat(val.rstrip("Z").split("+")[0])
+        except Exception:
+            pass
+        # M/D/YYYY h:MM:SS AM/PM (Markettimes format)
+        try:
+            return datetime.strptime(val, "%m/%d/%Y %I:%M:%S %p")
+        except Exception:
+            pass
+    time_tag = soup.select_one("time[datetime]")
+    if time_tag and time_tag.get("datetime"):
+        try:
+            return datetime.fromisoformat(time_tag["datetime"].rstrip("Z").split("+")[0])
+        except Exception:
+            pass
+    # .c-detail-head__time: "12:03 15/04/2026"
+    el = soup.select_one(".c-detail-head__time")
+    if el:
+        try:
+            return datetime.strptime(el.get_text(strip=True), "%H:%M %d/%m/%Y")
+        except Exception:
+            pass
+    return None
+
+
+def fetch_content(idx: int, url: str) -> tuple[int, str, datetime | None]:
     global _done
     if not url:
-        return idx, ""
+        return idx, "", None
+    pub_dt = None
+    content = ""
     try:
         resp = requests.get(url, headers=WEB_HEADERS, timeout=15)
         resp.raise_for_status()
         resp.encoding = "utf-8"
         soup = BeautifulSoup(resp.text, "html.parser")
 
+        pub_dt = parse_published_at(soup)
+
         article = (
             soup.select_one(".content-main-normal")
             or soup.select_one(".descriptionx")
             or soup.select_one(".c-news-detail")
         )
-        if not article:
-            return idx, ""
-
-        for tag in article.select("script, style, .ads, [class*=ads], .related, .tags"):
-            tag.decompose()
-
-        paragraphs = article.select("p")
-        texts = [p.get_text(separator=" ", strip=True) for p in paragraphs]
-        content = "\n\n".join(t for t in texts if t)
+        if article:
+            for tag in article.select("script, style, .ads, [class*=ads], .related, .tags"):
+                tag.decompose()
+            paragraphs = article.select("p")
+            texts = [p.get_text(separator=" ", strip=True) for p in paragraphs]
+            content = "\n\n".join(t for t in texts if t)
         time.sleep(CONTENT_DELAY)
     except Exception:
-        content = ""
+        pass
 
     with _lock:
         _done += 1
         if _done % 50 == 0 or _done <= 3:
             print(f"  [{_done}] {url[:70]}")
 
-    return idx, content
+    return idx, content, pub_dt
 
 
 def enrich_content(articles: list[dict]) -> list[dict]:
@@ -288,8 +320,10 @@ def enrich_content(articles: list[dict]) -> list[dict]:
             for i, a in enumerate(articles)
         }
         for future in as_completed(futures):
-            idx, content = future.result()
+            idx, content, pub_dt = future.result()
             articles[idx]["content"] = content
+            if pub_dt:
+                articles[idx]["published_at"] = pub_dt
 
     return articles
 

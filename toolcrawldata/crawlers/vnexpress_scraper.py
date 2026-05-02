@@ -98,16 +98,24 @@ def fetch_list_page(session: requests.Session, base_url: str, page: int) -> list
                 continue
 
             # Ngày từ thẻ time trong list
-            time_tag = item.select_one("span.time-count, span[class*='time']")
+            time_tag = item.select_one("span.time-count, span[class*='time'], span.time")
             pub_dt   = None
             if time_tag:
                 txt = time_tag.get_text(strip=True)
+                # dd/mm/yyyy
                 m = re.search(r"(\d{1,2})/(\d{1,2})/(\d{4})", txt)
                 if m:
                     try:
                         pub_dt = datetime(int(m.group(3)), int(m.group(2)), int(m.group(1)))
                     except Exception:
                         pass
+                if not pub_dt:
+                    # "X phút/giờ trước" → hôm nay
+                    if re.search(r'\d+\s*(phút|giờ|giay)\s*trước', txt, re.I):
+                        pub_dt = datetime.now()
+                    # "Hôm qua"
+                    elif re.search(r'hôm qua', txt, re.I):
+                        pub_dt = datetime.now() - timedelta(days=1)
 
             articles.append({
                 "title":       title,

@@ -96,6 +96,7 @@ def fetch_news_for_symbol(sb, symbol: str, since_date: str) -> list[dict]:
         .select('id,title,content,article_url,label,source,published_at,news_type,affected_symbols,impact_reasoning,impact_score')
         .eq('symbol', symbol)
         .in_('label', list(EMAIL_LABELS))
+        .gte('published_at', since_date)
         .gte('labeled_at', since_date)
         .order('published_at', desc=True)
         .limit(20)
@@ -112,6 +113,7 @@ def fetch_news_for_symbol(sb, symbol: str, since_date: str) -> list[dict]:
             .select('id,title,content,article_url,label,source,published_at,news_type,affected_symbols,impact_reasoning,impact_score')
             .contains('affected_symbols', [symbol])
             .in_('label', list(EMAIL_LABELS))
+            .gte('published_at', since_date)
             .gte('labeled_at', since_date)
             .order('published_at', desc=True)
             .limit(20)
@@ -122,7 +124,7 @@ def fetch_news_for_symbol(sb, symbol: str, since_date: str) -> list[dict]:
                 seen_ids.add(row['id'])
                 results.append(row)
 
-    # Sort theo |impact_score| giảm dần → bài tác động mạnh nhất lên đầu
+    # Sort theo |impact_score| giảm dần → bài ảnh hưởng mạnh nhất (tích cực hoặc tiêu cực) lên đầu
     results.sort(key=lambda x: abs(x.get('impact_score') or 0), reverse=True)
     return results[:3]
 
@@ -346,7 +348,7 @@ def send_email(to: str, subject: str, html: str) -> bool:
         return False
 
 
-def run(test_email: str = None):
+def run(test_email=None):
     if not RESEND_API_KEY:
         log.error('Thieu RESEND_API_KEY trong .env')
         return
@@ -357,9 +359,8 @@ def run(test_email: str = None):
     log.info('[1] Load subscribers...')
     subscribers = fetch_subscribers(sb)
     if test_email:
-        subscribers = [s for s in subscribers if s['email'] == test_email]
-        if not subscribers:
-            subscribers = [{'email': test_email, 'holdings': [{'symbol': 'FPT', 'quantity': 100}]}]
+        allowed = {test_email} if isinstance(test_email, str) else set(test_email)
+        subscribers = [s for s in subscribers if s['email'] in allowed]
     log.info(f'  -> {len(subscribers):,} subscribers')
 
     all_symbols = set()

@@ -95,13 +95,15 @@ def run_crawl() -> list[str]:
         articles = mod.scrape_article_list()
         if articles:
             articles = mod.enrich_content(articles)
+            cutoff = datetime.now() - timedelta(hours=24)
+            articles = [a for a in articles if a.get('_dt') and a['_dt'] >= cutoff]
             new_articles = [
                 a for a in articles
                 if a.get('article_url') and a['article_url'] not in existing_urls
             ]
             mod.upsert_to_supabase(articles)
             all_new_urls += [a['article_url'] for a in new_articles if a.get('article_url')]
-            log.info(f'  VnExpress: {len(articles)} crawl, {len(new_articles)} bai INSERT moi')
+            log.info(f'  VnExpress: {len(articles)} bai trong 24h, {len(new_articles)} bai INSERT moi')
         else:
             log.warning('  VnExpress: khong co bai nao')
     except Exception as e:
@@ -124,15 +126,40 @@ def run_crawl() -> list[str]:
             articles = mod.enrich_content(articles)
             new_articles = [
                 a for a in articles
-                if a.get('article_url') and a['article_url'] not in existing_urls
+                if a.get('Link bài viết') and a['Link bài viết'] not in existing_urls
             ]
             mod.upsert_news_to_supabase(articles)
-            all_new_urls += [a.get('article_url') or a.get('Link bài viết') for a in new_articles]
+            all_new_urls += [a['Link bài viết'] for a in new_articles if a.get('Link bài viết')]
             log.info(f'  Vietstock: {len(articles)} crawl, {len(new_articles)} bai INSERT moi')
         else:
             log.warning('  Vietstock: khong co bai nao')
     except Exception as e:
         log.error(f'  Vietstock loi: {e}')
+
+    # CafeF
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('cafef_scraper', CRAWLERS_DIR / 'cafef_scraper.py')
+        mod  = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        mod.LOOKBACK_DAYS = 1
+        mod.MAX_PAGES     = 5
+        mod.WORKERS       = 5
+
+        articles = mod.scrape_all()
+        if articles:
+            articles = mod.enrich_content(articles)
+            cutoff = datetime.now() - timedelta(hours=24)
+            articles = [a for a in articles if a.get('published_at') and datetime.fromisoformat(str(a['published_at'])) >= cutoff]
+            new_articles = [a for a in articles if a.get('article_url') and a['article_url'] not in existing_urls]
+            mod.upsert_to_supabase(articles)
+            all_new_urls += [a['article_url'] for a in new_articles if a.get('article_url')]
+            log.info(f'  CafeF: {len(articles)} bai trong 24h, {len(new_articles)} bai INSERT moi')
+        else:
+            log.warning('  CafeF: khong co bai nao')
+    except Exception as e:
+        log.error(f'  CafeF loi: {e}')
 
     # Markettimes
     try:
@@ -144,13 +171,18 @@ def run_crawl() -> list[str]:
         articles = mod.scrape_all_channels(lookback_days=1)
         if articles:
             articles = mod.enrich_content(articles)
+            cutoff = datetime.now() - timedelta(hours=24)
+            articles = [
+                a for a in articles
+                if a.get('published_at') and datetime.fromisoformat(str(a['published_at'])) >= cutoff
+            ]
             new_articles = [
                 a for a in articles
                 if a.get('article_url') and a['article_url'] not in existing_urls
             ]
             mod.upsert_to_supabase(articles)
             all_new_urls += [a['article_url'] for a in new_articles if a.get('article_url')]
-            log.info(f'  Markettimes: {len(articles)} crawl, {len(new_articles)} bai INSERT moi')
+            log.info(f'  Markettimes: {len(articles)} bai trong 24h, {len(new_articles)} bai INSERT moi')
         else:
             log.warning('  Markettimes: khong co bai nao')
     except Exception as e:
@@ -230,8 +262,11 @@ Chọn đúng 1 nhãn:
 
 ## BƯỚC 3 — MÃ CỔ PHIẾU BỊ ẢNH HƯỞNG (affected_symbols)
 Tối đa 5 mã viết hoa. Mảng rỗng [] nếu không xác định được.
-- Tin vĩ mô/thị trường: liệt kê mã blue-chip liên quan trực tiếp
+Chỉ gán mã khi CÓ THỂ diễn giải rõ cơ chế tác động cụ thể đến doanh thu/lợi nhuận/chi phí của DN đó trong reasoning.
 - Tin DN cụ thể: chỉ mã đó
+- Tin vĩ mô/ngành: chỉ gán mã nếu tin ảnh hưởng trực tiếp đến ngành/sản phẩm chính của DN (VD: lãi suất → ngân hàng, giá thép → HPG, tỷ giá → doanh nghiệp xuất khẩu lớn). KHÔNG gán blue-chip đại diện một cách chung chung. Nếu ảnh hưởng gián tiếp thì ở phải giải thích rõ cơ chế tác động trong phần reasoning, không chỉ gán mã đại diện.
+- Tin thị trường: chỉ gán mã nếu có cơ chế rõ ràng tại reasoning 
+
 
 ## BƯỚC 4 — CHẤM ĐIỂM TÁC ĐỘNG (impact_score)
 Thang -10 đến +10, bước 0.5. Xét theo thứ tự:
@@ -413,12 +448,12 @@ Nếu không trash:
 
 # ── Bước 3: Email ──────────────────────────────────────────────────────────────
 
-def run_email():
-    """Gửi email cho tất cả subscribers."""
+def run_email(test_email: str = None):
+    """Gửi email. Nếu test_email được truyền vào, chỉ gửi cho địa chỉ đó."""
     step_header(3, 'GỬI EMAIL THÔNG BÁO')
     try:
         from email_notifier import run
-        run()
+        run(test_email=test_email)
     except Exception as e:
         log.error(f'  Email lỗi: {e}')
 
@@ -438,7 +473,7 @@ def main():
     n_labeled = run_label_and_score(new_urls)
     time.sleep(2)
 
-    run_email()
+    run_email(test_email=['pminh7794@gmail.com', 'longsctn55@gmail.com'])
 
     elapsed = time.time() - start
     log.info('=' * 55)
