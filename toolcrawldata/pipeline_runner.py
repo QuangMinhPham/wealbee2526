@@ -246,8 +246,10 @@ Gán "trash": true nếu thuộc BẤT KỲ điều kiện nào:
 - Thông báo hành chính thuần túy không có số liệu mới (giải trình, đính chính)
 - Thông báo sự kiện DN (ngày ĐKCC, chốt quyền cổ tức, ĐHCĐ) mà KHÔNG có số liệu
   cụ thể: tỷ lệ cổ tức, số tiền/cổ phiếu, ngày thanh toán, chương trình nghị sự
+  NGOẠI LỆ: khởi công, động thổ, ký kết hợp đồng có quy mô vốn/giá trị cụ thể → KHÔNG phải trash
 - Quảng cáo, advertorial, PR không có thông tin mới
 - Tin chỉ tóm tắt lại bài cũ, không có sự kiện mới phát sinh
+  NGOẠI LỆ: cập nhật số liệu mới theo kỳ (lãi suất tháng X, giá vàng ngày X, KQKD quý X) → KHÔNG phải trash
 - Tin quốc tế không có liên hệ rõ ràng đến Việt Nam
 Nếu "trash": true → trả về ngay với các trường còn lại = null.
 
