@@ -86,7 +86,7 @@ def fetch_subscribers(sb) -> list[dict]:
     return result.data or []
 
 
-def fetch_news_for_symbol(sb, symbol: str, since_date: str) -> list[dict]:
+def fetch_news_for_symbol(sb, symbol: str, since_published: str, since_labeled: str) -> list[dict]:
     seen_ids = set()
     results = []
 
@@ -96,8 +96,8 @@ def fetch_news_for_symbol(sb, symbol: str, since_date: str) -> list[dict]:
         .select('id,title,content,article_url,label,source,published_at,news_type,affected_symbols,impact_reasoning,impact_score')
         .eq('symbol', symbol)
         .in_('label', list(EMAIL_LABELS))
-        .gte('published_at', since_date)
-        .gte('labeled_at', since_date)
+        .gte('published_at', since_published)
+        .gte('labeled_at', since_labeled)
         .order('published_at', desc=True)
         .limit(20)
         .execute()
@@ -113,8 +113,8 @@ def fetch_news_for_symbol(sb, symbol: str, since_date: str) -> list[dict]:
             .select('id,title,content,article_url,label,source,published_at,news_type,affected_symbols,impact_reasoning,impact_score')
             .contains('affected_symbols', [symbol])
             .in_('label', list(EMAIL_LABELS))
-            .gte('published_at', since_date)
-            .gte('labeled_at', since_date)
+            .gte('published_at', since_published)
+            .gte('labeled_at', since_labeled)
             .order('published_at', desc=True)
             .limit(20)
             .execute()
@@ -365,7 +365,8 @@ def run(test_email=None):
         return
 
     sb    = get_client()
-    since = (datetime.now() - timedelta(hours=24)).isoformat()
+    since_published = (datetime.now() - timedelta(hours=28)).isoformat()
+    since_labeled   = (datetime.now() - timedelta(hours=24)).isoformat()
 
     log.info('[1] Load subscribers...')
     subscribers = fetch_subscribers(sb)
@@ -383,7 +384,7 @@ def run(test_email=None):
     log.info(f'[2] Fetch tin tuc cho {len(all_symbols)} symbols...')
     news_by_symbol = {}
     for symbol in all_symbols:
-        news_by_symbol[symbol] = fetch_news_for_symbol(sb, symbol, since)
+        news_by_symbol[symbol] = fetch_news_for_symbol(sb, symbol, since_published, since_labeled)
         count = len(news_by_symbol[symbol])
         if count:
             log.info(f'  {symbol}: {count} bai')

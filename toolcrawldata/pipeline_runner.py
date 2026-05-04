@@ -475,7 +475,7 @@ def main():
     n_labeled = run_label_and_score(new_urls)
     time.sleep(2)
 
-    run_email(test_email=['pminh7794@gmail.com', 'longsctn55@gmail.com'])
+    run_email()
 
     elapsed = time.time() - start
     log.info('=' * 55)
