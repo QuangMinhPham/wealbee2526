@@ -88,7 +88,7 @@ def run_crawl() -> list[str]:
         mod  = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
 
-        mod.START_DATE = date.today() - timedelta(days=1)
+        mod.START_DATE = date.today()
         mod.MAX_PAGES  = 10
         mod.WORKERS    = 5
 
@@ -119,7 +119,7 @@ def run_crawl() -> list[str]:
         mod  = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
 
-        mod.START_DATE = date.today() - timedelta(days=1)
+        mod.START_DATE = date.today()
 
         articles = mod.scrape_article_list()
         if articles:
@@ -143,7 +143,7 @@ def run_crawl() -> list[str]:
         mod  = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
 
-        mod.LOOKBACK_DAYS = 1
+        mod.LOOKBACK_DAYS = 2
         mod.MAX_PAGES     = 5
         mod.WORKERS       = 5
 
@@ -168,7 +168,7 @@ def run_crawl() -> list[str]:
         mod  = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
 
-        articles = mod.scrape_all_channels(lookback_days=1)
+        articles = mod.scrape_all_channels(lookback_days=2)
         if articles:
             articles = mod.enrich_content(articles)
             cutoff = datetime.now() - timedelta(hours=24)
