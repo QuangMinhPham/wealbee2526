@@ -229,11 +229,11 @@ def build_email_html(email: str, holdings: list[dict], news_by_symbol: dict) -> 
     weekday_display = weekday_full[vn_now.weekday()]
 
     hour = vn_now.hour
-    if 5 <= hour < 12:
+    if 5 <= hour < 11:
         buoi = 'buổi sáng'
-    elif 12 <= hour < 14:
+    elif 11 <= hour < 13:
         buoi = 'buổi trưa'
-    elif 14 <= hour < 18:
+    elif 13 <= hour < 18:
         buoi = 'buổi chiều'
     else:
         buoi = 'buổi tối'
@@ -406,11 +406,11 @@ def run(test_email=None):
     vn_now    = datetime.now(ZoneInfo('Asia/Ho_Chi_Minh'))
     today_str = vn_now.strftime('%d/%m/%Y')
     _hour = vn_now.hour
-    if 5 <= _hour < 12:
+    if 5 <= _hour < 11:
         _buoi = 'Buổi Sáng'
-    elif 12 <= _hour < 14:
+    elif 11 <= _hour < 13:
         _buoi = 'Buổi Trưa'
-    elif 14 <= _hour < 18:
+    elif 13 <= _hour < 18:
         _buoi = 'Buổi Chiều'
     else:
         _buoi = 'Buổi Tối'
