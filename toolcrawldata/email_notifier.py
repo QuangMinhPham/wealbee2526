@@ -228,6 +228,17 @@ def build_email_html(email: str, holdings: list[dict], news_by_symbol: dict) -> 
     weekday_full = ['Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy', 'Chủ Nhật']
     weekday_display = weekday_full[vn_now.weekday()]
 
+    hour = vn_now.hour
+    if 5 <= hour < 12:
+        buoi = 'buổi sáng'
+    elif 12 <= hour < 14:
+        buoi = 'buổi trưa'
+    elif 14 <= hour < 18:
+        buoi = 'buổi chiều'
+    else:
+        buoi = 'buổi tối'
+    buoi_cap = buoi.capitalize()
+
     holding_blocks = ''
     for holding in holdings:
         symbol    = holding.get('symbol', '')
@@ -265,7 +276,7 @@ def build_email_html(email: str, holdings: list[dict], news_by_symbol: dict) -> 
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-  <title>Wealbee - Bản tin buổi sáng</title>
+  <title>Wealbee - Bản tin {buoi}</title>
 </head>
 <body style="margin:0;padding:0;background:#F4F5F7;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#F4F5F7;padding:32px 0;">
@@ -302,7 +313,7 @@ def build_email_html(email: str, holdings: list[dict], news_by_symbol: dict) -> 
         <tr>
           <td style="background:#ECF2FF;padding:14px 32px;">
             <p style="margin:0;color:#0849AC;font-size:15px;font-weight:600;">
-              Bản tin buổi sáng &nbsp;·&nbsp; {now_str}
+              Bản tin {buoi} &nbsp;·&nbsp; {now_str}
             </p>
           </td>
         </tr>
@@ -391,7 +402,18 @@ def run(test_email=None):
 
     log.info('[3] Gui email...')
     ok = fail = skip = 0
-    today_str = date.today().strftime('%d/%m/%Y')
+    from zoneinfo import ZoneInfo
+    vn_now    = datetime.now(ZoneInfo('Asia/Ho_Chi_Minh'))
+    today_str = vn_now.strftime('%d/%m/%Y')
+    _hour = vn_now.hour
+    if 5 <= _hour < 12:
+        _buoi = 'Buổi Sáng'
+    elif 12 <= _hour < 14:
+        _buoi = 'Buổi Trưa'
+    elif 14 <= _hour < 18:
+        _buoi = 'Buổi Chiều'
+    else:
+        _buoi = 'Buổi Tối'
 
     for sub in subscribers:
         email    = sub.get('email', '')
@@ -404,7 +426,7 @@ def run(test_email=None):
         if not html:
             skip += 1
             continue
-        success = send_email(to=email, subject=f'Wealbee · Ban tin buoi sang {today_str}', html=html)
+        success = send_email(to=email, subject=f'Wealbee · Bản Tin {_buoi} {today_str}', html=html)
         if success:
             ok += 1
         else:
