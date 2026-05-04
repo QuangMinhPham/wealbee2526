@@ -95,7 +95,7 @@ def run_crawl() -> list[str]:
         articles = mod.scrape_article_list()
         if articles:
             articles = mod.enrich_content(articles)
-            cutoff = datetime.now() - timedelta(hours=24)
+            cutoff = datetime.now() - timedelta(hours=28)
             articles = [a for a in articles if a.get('_dt') and a['_dt'] >= cutoff]
             new_articles = [
                 a for a in articles
@@ -150,7 +150,7 @@ def run_crawl() -> list[str]:
         articles = mod.scrape_all()
         if articles:
             articles = mod.enrich_content(articles)
-            cutoff = datetime.now() - timedelta(hours=24)
+            cutoff = datetime.now() - timedelta(hours=28)
             articles = [a for a in articles if a.get('published_at') and datetime.fromisoformat(str(a['published_at'])) >= cutoff]
             new_articles = [a for a in articles if a.get('article_url') and a['article_url'] not in existing_urls]
             mod.upsert_to_supabase(articles)
@@ -171,7 +171,7 @@ def run_crawl() -> list[str]:
         articles = mod.scrape_all_channels(lookback_days=2)
         if articles:
             articles = mod.enrich_content(articles)
-            cutoff = datetime.now() - timedelta(hours=24)
+            cutoff = datetime.now() - timedelta(hours=28)
             articles = [
                 a for a in articles
                 if a.get('published_at') and datetime.fromisoformat(str(a['published_at'])) >= cutoff
