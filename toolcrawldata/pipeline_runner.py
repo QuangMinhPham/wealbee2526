@@ -88,7 +88,7 @@ def run_crawl() -> list[str]:
         mod  = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
 
-        mod.START_DATE = date.today()
+        mod.START_DATE = date.today() - timedelta(days=1)
         mod.MAX_PAGES  = 10
         mod.WORKERS    = 5
 
@@ -119,7 +119,7 @@ def run_crawl() -> list[str]:
         mod  = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
 
-        mod.START_DATE = date.today()
+        mod.START_DATE = date.today() - timedelta(days=1)
 
         articles = mod.scrape_article_list()
         if articles:
