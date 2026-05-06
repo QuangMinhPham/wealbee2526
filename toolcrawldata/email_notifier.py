@@ -420,10 +420,13 @@ def run(test_email=None):
         holdings = sub.get('holdings') or []
         has_news = any(news_by_symbol.get(h.get('symbol')) for h in holdings if h.get('symbol'))
         if not has_news:
+            symbols = [h.get('symbol') for h in holdings if h.get('symbol')]
+            log.info(f'  Skip {email} (khong co tin: {symbols})')
             skip += 1
             continue
         html = build_email_html(email, holdings, news_by_symbol)
         if not html:
+            log.info(f'  Skip {email} (html rong)')
             skip += 1
             continue
         success = send_email(to=email, subject=f'Wealbee · Bản Tin {_buoi} {today_str}', html=html)
