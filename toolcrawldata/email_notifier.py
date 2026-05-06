@@ -239,6 +239,76 @@ def build_email_html(email: str, holdings: list[dict], news_by_symbol: dict) -> 
         buoi = 'buổi tối'
     buoi_cap = buoi.capitalize()
 
+    # Phân loại cổ phiếu có / không có tin
+    symbols_with_news    = [h.get('symbol') for h in holdings if h.get('symbol') and news_by_symbol.get(h.get('symbol'))]
+    symbols_without_news = [h.get('symbol') for h in holdings if h.get('symbol') and not news_by_symbol.get(h.get('symbol'))]
+
+    # Block tổng quan danh mục
+    with_news_html = ''
+    if symbols_with_news:
+        chips = ''.join(
+            f'<span style="display:inline-block;background:#E8F5E9;color:#2E7D32;font-size:11px;font-weight:700;'
+            f'padding:3px 10px;border-radius:20px;margin:2px 3px 2px 0;">{s}</span>'
+            for s in symbols_with_news
+        )
+        with_news_html = f"""
+              <tr>
+                <td style="padding-bottom:10px;">
+                  <table cellpadding="0" cellspacing="0">
+                    <tr>
+                      <td style="vertical-align:top;padding-top:4px;padding-right:8px;">
+                        <span style="display:inline-block;width:8px;height:8px;background:#2E7D32;border-radius:50%;"></span>
+                      </td>
+                      <td>
+                        <span style="color:#717182;font-size:12px;font-weight:600;">Có tin tức ảnh hưởng:&nbsp;</span>
+                        {chips}
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>"""
+
+    without_news_html = ''
+    if symbols_without_news:
+        chips = ''.join(
+            f'<span style="display:inline-block;background:#F3F4F6;color:#9CA3AF;font-size:11px;font-weight:700;'
+            f'padding:3px 10px;border-radius:20px;margin:2px 3px 2px 0;">{s}</span>'
+            for s in symbols_without_news
+        )
+        without_news_html = f"""
+              <tr>
+                <td>
+                  <table cellpadding="0" cellspacing="0">
+                    <tr>
+                      <td style="vertical-align:top;padding-top:4px;padding-right:8px;">
+                        <span style="display:inline-block;width:8px;height:8px;background:#D1D5DB;border-radius:50%;"></span>
+                      </td>
+                      <td>
+                        <span style="color:#717182;font-size:12px;font-weight:600;">Không có tin tức:&nbsp;</span>
+                        {chips}
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>"""
+
+    portfolio_summary_block = f"""
+        <tr>
+          <td style="background:#ffffff;padding:16px 32px 4px;">
+            <p style="margin:0 0 12px;color:#030213;font-size:12px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;">Danh mục hôm nay</p>
+            <table width="100%" cellpadding="0" cellspacing="0">
+              {with_news_html}
+              {without_news_html}
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td style="background:#ffffff;padding:0 32px 16px;">
+            <div style="border-top:1px solid #ECECF0;"></div>
+          </td>
+        </tr>"""
+
+    # Blocks tin tức theo từng cổ phiếu
     holding_blocks = ''
     for holding in holdings:
         symbol    = holding.get('symbol', '')
@@ -268,8 +338,25 @@ def build_email_html(email: str, holdings: list[dict], news_by_symbol: dict) -> 
           </td>
         </tr>"""
 
+    # Nếu không có tin nào cho bất kỳ cổ phiếu nào → block thông báo
     if not holding_blocks:
-        return ''
+        symbol_list = ' · '.join(f'<strong>{s}</strong>' for s in symbols_without_news) if symbols_without_news else 'các cổ phiếu trong danh mục'
+        holding_blocks = f"""
+        <tr>
+          <td style="background:#ffffff;padding:8px 32px 24px;">
+            <table width="100%" cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="background:#F8F9FB;border-radius:10px;border-left:4px solid #E5E7EB;padding:20px 18px;">
+                  <p style="margin:0 0 8px;color:#374151;font-size:14px;font-weight:600;">Không có tin tức nổi bật hôm nay</p>
+                  <p style="margin:0;color:#6B7280;font-size:13px;line-height:1.7;">
+                    Trong 24 giờ qua, chưa ghi nhận tin tức nào ảnh hưởng đáng kể đến {symbol_list} trong danh mục của bạn.
+                    Chúng tôi sẽ thông báo ngay khi có thông tin mới.
+                  </p>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>"""
 
     return f"""<!DOCTYPE html>
 <html lang="vi">
@@ -322,7 +409,7 @@ def build_email_html(email: str, holdings: list[dict], news_by_symbol: dict) -> 
         <tr>
           <td style="background:#ffffff;padding:24px 32px 12px;">
             <p style="margin:0;color:#030213;font-size:15px;line-height:1.6;">
-              Chào buổi sáng! Dưới đây là những tin tức quan trọng ảnh hưởng đến danh mục của bạn hôm nay.
+              Dưới đây là những tin tức quan trọng ảnh hưởng đến danh mục của bạn hôm nay.
             </p>
           </td>
         </tr>
@@ -331,6 +418,8 @@ def build_email_html(email: str, holdings: list[dict], news_by_symbol: dict) -> 
             <div style="border-top:1px solid #ECECF0;"></div>
           </td>
         </tr>
+
+        {portfolio_summary_block}
 
         {holding_blocks}
 
@@ -418,10 +507,8 @@ def run(test_email=None):
     for sub in subscribers:
         email    = sub.get('email', '')
         holdings = sub.get('holdings') or []
-        has_news = any(news_by_symbol.get(h.get('symbol')) for h in holdings if h.get('symbol'))
-        if not has_news:
-            symbols = [h.get('symbol') for h in holdings if h.get('symbol')]
-            log.info(f'  Skip {email} (khong co tin: {symbols})')
+        if not holdings:
+            log.info(f'  Skip {email} (khong co holdings)')
             skip += 1
             continue
         html = build_email_html(email, holdings, news_by_symbol)
