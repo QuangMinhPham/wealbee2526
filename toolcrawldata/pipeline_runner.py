@@ -444,6 +444,48 @@ Nếu không trash:
                         }
                     except Exception as e2:
                         log.warning(f'  Retry that bai sau rate limit {article["id"][:8]}: {e2}')
+                elif any(x in err.lower() for x in ['disconnected', 'connecterror', 'remoteprotocol', 'timeout', 'connection']):
+                    import time as _time
+                    log.warning(f'  Connection error, cho 3s roi retry: {article["id"][:8]}')
+                    _time.sleep(3)
+                    try:
+                        resp = client.chat.completions.create(
+                            model='gpt-4.1-mini',
+                            messages=[
+                                {'role': 'system', 'content': SYSTEM_PROMPT},
+                                {'role': 'user',   'content': user_text},
+                            ],
+                            max_tokens=300,
+                            temperature=0,
+                            response_format={'type': 'json_object'},
+                        )
+                        data = json.loads(resp.choices[0].message.content.strip())
+                        if data.get('trash'):
+                            return article['id'], {
+                                'label': 'trash', 'news_type': None,
+                                'affected_symbols': None, 'impact_score': None,
+                                'impact_reasoning': None,
+                            }
+                        score     = data.get('impact_score')
+                        label     = score_to_label(float(score)) if isinstance(score, (int, float)) else data.get('label', 'neutral')
+                        ntype     = data.get('news_type', 'thi_truong')
+                        affected  = data.get('affected_symbols') or []
+                        reasoning = (data.get('impact_reasoning') or '').strip()
+                        if label not in VALID_LABELS:
+                            label = 'neutral'
+                        if ntype not in VALID_TYPES:
+                            ntype = 'thi_truong'
+                        if not isinstance(affected, list):
+                            affected = []
+                        affected = [s for s in affected if isinstance(s, str) and len(s) <= 10][:5]
+                        return article['id'], {
+                            'label': label, 'news_type': ntype,
+                            'affected_symbols': affected,
+                            'impact_score': float(score) if isinstance(score, (int, float)) else None,
+                            'impact_reasoning': reasoning or None,
+                        }
+                    except Exception as e2:
+                        log.warning(f'  Retry that bai sau connection error {article["id"][:8]}: {e2}')
                 log.warning(f'  API loi {article["id"][:8]}: {e}')
                 return article['id'], {
                     'label': 'neutral', 'news_type': 'thi_truong',
@@ -467,7 +509,7 @@ Nếu không trash:
                 continue
 
             log.info(f'  Dang xu ly {len(articles)} bai...')
-            with ThreadPoolExecutor(max_workers=5) as executor:
+            with ThreadPoolExecutor(max_workers=3) as executor:
                 futures = {executor.submit(process_one, a): a for a in articles}
                 for future in as_completed(futures):
                     try:
@@ -475,12 +517,20 @@ Nếu không trash:
                     except Exception as fe:
                         log.warning(f'  Future loi: {fe}')
                         continue
-                    sb.table('market_news').update({
-                        **fields,
-                        'labeled_at':       datetime.now().isoformat(),
-                        'labeled_by':       'gpt-4.1-mini',
-                        'impact_scored_at': datetime.now().isoformat() if fields.get('impact_score') is not None else None,
-                    }).eq('id', rec_id).execute()
+                    for attempt in range(3):
+                        try:
+                            sb.table('market_news').update({
+                                **fields,
+                                'labeled_at':       datetime.now().isoformat(),
+                                'labeled_by':       'gpt-4.1-mini',
+                                'impact_scored_at': datetime.now().isoformat() if fields.get('impact_score') is not None else None,
+                            }).eq('id', rec_id).execute()
+                            break
+                        except Exception as ue:
+                            if attempt < 2:
+                                import time as _t; _t.sleep(2 ** attempt)
+                            else:
+                                log.warning(f'  Supabase update that bai {rec_id[:8]}: {ue}')
                     log.info(f'  ✓ {rec_id[:8]}... → {fields["label"]} (score={fields.get("impact_score")})')
                     total += 1
 
