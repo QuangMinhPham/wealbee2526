@@ -286,10 +286,16 @@ Ngưỡng nhãn:
 - -5.0 ≤ score < -1.5 → label = "negative"
 - score < -5.0 → label = "very_negative"
 
-## BƯỚC 5 — REASONING (đúng 2 câu, bắt buộc)
-CÂU 1 — Cơ chế + số:
-"[Sự kiện cụ thể] → [cơ chế tác động] → [chỉ số tài chính bị ảnh hưởng + ước lượng định lượng]"
-CÂU 2 — Bối cảnh DN (nếu có thông tin DN) hoặc hệ quả ngắn hạn cho nhà đầu tư.
+## BƯỚC 5 — REASONING (bắt buộc)
+Nếu affected_symbols có ≥2 mã → dùng format phân theo symbol (KHÔNG dùng ngoặc vuông trong nội dung câu):
+[Chung] 1-2 câu tổng quan về sự kiện và cơ chế tác động chung.
+[SYMBOL1] Câu 1: [sự kiện] → [cơ chế] → [chỉ số tài chính + ước lượng]. Câu 2: bối cảnh DN hoặc hệ quả ngắn hạn.
+[SYMBOL2] Câu 1. Câu 2.
+(Viết cho đủ từng mã trong affected_symbols, không bỏ sót mã nào)
+
+Nếu affected_symbols có 0–1 mã → dùng format 2 câu:
+CÂU 1: [Sự kiện cụ thể] → [cơ chế tác động] → [chỉ số tài chính + ước lượng định lượng]
+CÂU 2: Bối cảnh DN hoặc hệ quả ngắn hạn cho nhà đầu tư.
 
 NGÔN NGỮ BẮT BUỘC:
 ✅ Dùng: thu hẹp, kéo giảm, gây áp lực, đẩy tăng, xói mòn, siết chặt, hỗ trợ, tạo dư địa
@@ -519,31 +525,57 @@ Nếu không trash:
             if not articles:
                 continue
 
-            log.info(f'  Dang xu ly {len(articles)} bai...')
+            # Dedup theo tiêu đề: chỉ gọi GPT cho 1 bài mỗi nhóm trùng tiêu đề
+            from collections import defaultdict
+            title_groups = defaultdict(list)
+            for a in articles:
+                key = (a.get('title') or '').strip().lower()
+                title_groups[key].append(a)
+
+            primaries    = []
+            secondary_map = {}  # primary_id -> [secondary_ids]
+            for key, group in title_groups.items():
+                if len(group) == 1:
+                    primaries.append(group[0])
+                else:
+                    primary = max(group, key=lambda x: len(x.get('content') or ''))
+                    primaries.append(primary)
+                    secondary_map[primary['id']] = [a['id'] for a in group if a['id'] != primary['id']]
+                    log.info(f'  Dedup: {len(group)} bai trung tieu de → xu ly {primary["id"][:8]}')
+
+            log.info(f'  Dang xu ly {len(primaries)}/{len(articles)} bai (sau dedup)...')
             with ThreadPoolExecutor(max_workers=3) as executor:
-                futures = {executor.submit(process_one, a): a for a in articles}
+                futures = {executor.submit(process_one, a): a for a in primaries}
                 for future in as_completed(futures):
                     try:
                         rec_id, fields = future.result()
                     except Exception as fe:
                         log.warning(f'  Future loi: {fe}')
                         continue
-                    for attempt in range(3):
-                        try:
-                            sb.table('market_news').update({
-                                **fields,
-                                'labeled_at':       datetime.now().isoformat(),
-                                'labeled_by':       'gpt-4.1-mini',
-                                'impact_scored_at': datetime.now().isoformat() if fields.get('impact_score') is not None else None,
-                            }).eq('id', rec_id).execute()
-                            break
-                        except Exception as ue:
-                            if attempt < 2:
-                                import time as _t; _t.sleep(2 ** attempt)
-                            else:
-                                log.warning(f'  Supabase update that bai {rec_id[:8]}: {ue}')
-                    log.info(f'  ✓ {rec_id[:8]}... → {fields["label"]} (score={fields.get("impact_score")})')
-                    total += 1
+
+                    update_payload = {
+                        **fields,
+                        'labeled_at':       datetime.now().isoformat(),
+                        'labeled_by':       'gpt-4.1-mini',
+                        'impact_scored_at': datetime.now().isoformat() if fields.get('impact_score') is not None else None,
+                    }
+
+                    ids_to_update = [rec_id] + secondary_map.get(rec_id, [])
+                    for uid in ids_to_update:
+                        for attempt in range(3):
+                            try:
+                                sb.table('market_news').update(update_payload).eq('id', uid).execute()
+                                break
+                            except Exception as ue:
+                                if attempt < 2:
+                                    import time as _t; _t.sleep(2 ** attempt)
+                                else:
+                                    log.warning(f'  Supabase update that bai {uid[:8]}: {ue}')
+
+                    n_copies = len(secondary_map.get(rec_id, []))
+                    suffix = f' + copy sang {n_copies} ban trung' if n_copies else ''
+                    log.info(f'  ✓ {rec_id[:8]}... → {fields["label"]} (score={fields.get("impact_score")}){suffix}')
+                    total += len(ids_to_update)
 
         log.info(f'  Da xu ly: {total} bai')
         return total

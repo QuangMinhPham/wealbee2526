@@ -124,9 +124,87 @@ def fetch_news_for_symbol(sb, symbol: str, since_published: str, since_labeled: 
                 seen_ids.add(row['id'])
                 results.append(row)
 
-    # Sort theo |impact_score| giảm dần → bài ảnh hưởng mạnh nhất (tích cực hoặc tiêu cực) lên đầu
+    # Sort theo |impact_score| giảm dần → bài ảnh hưởng mạnh nhất lên đầu
     results.sort(key=lambda x: abs(x.get('impact_score') or 0), reverse=True)
-    return results[:3]
+
+    # Dedup theo tiêu đề: giữ bài score cao nhất, gắn nguồn còn lại vào _alt_sources
+    seen_titles = {}
+    deduped = []
+    for row in results:
+        key = (row.get('title') or '').strip().lower()
+        if key in seen_titles:
+            seen_titles[key].setdefault('_alt_sources', []).append({
+                'source': row.get('source', ''),
+                'url':    row.get('article_url', '#'),
+            })
+        else:
+            seen_titles[key] = row
+            deduped.append(row)
+
+    return deduped[:3]
+
+
+import re as _re
+
+def _extract_reasoning_for_symbol(reasoning: str, symbol: str) -> str:
+    """Với bài 1 symbol: extract [Chung] + [SYMBOL] nếu dùng format mới, fallback nguyên văn."""
+    if not reasoning or not _re.search(r'\[[A-Z]{1,10}\]', reasoning):
+        return reasoning
+    parts = _re.split(r'\[([^\]]+)\]', reasoning)
+    result = []
+    for i in range(1, len(parts), 2):
+        tag  = parts[i].strip()
+        text = parts[i + 1].strip() if i + 1 < len(parts) else ''
+        if text and (tag == 'Chung' or tag == symbol):
+            result.append(text)
+    return ' '.join(result) if result else reasoning
+
+
+def _reasoning_html_multi(reasoning: str, user_symbols: set) -> str:
+    """Render per-symbol reasoning HTML cho multi-symbol card."""
+    if not reasoning:
+        return ''
+    if not _re.search(r'\[[A-Z]{1,10}\]', reasoning):
+        return f'<p style="margin:0;color:#4A5568;font-size:12px;line-height:1.6;">{reasoning}</p>'
+    parts = _re.split(r'\[([^\]]+)\]', reasoning)
+    html  = []
+    for i in range(1, len(parts), 2):
+        tag  = parts[i].strip()
+        text = parts[i + 1].strip() if i + 1 < len(parts) else ''
+        if not text:
+            continue
+        if tag == 'Chung':
+            html.append(f'<p style="margin:0 0 8px;color:#4A5568;font-size:12px;line-height:1.6;">{text}</p>')
+        elif tag in user_symbols:
+            html.append(
+                f'<p style="margin:0 0 6px;color:#4A5568;font-size:12px;line-height:1.6;">'
+                f'<span style="color:#0849AC;font-weight:700;font-style:italic;">[{tag}]</span> {text}</p>'
+            )
+        else:
+            html.append(
+                f'<p style="margin:0 0 6px;color:#9CA3AF;font-size:12px;line-height:1.6;">'
+                f'<span style="font-weight:600;">[{tag}]</span> {text}</p>'
+            )
+    return ''.join(html)
+
+
+def _affected_chips_html(affected_symbols: list, user_symbols: set) -> str:
+    """Render chip mã cổ phiếu: user's symbols nổi bật xanh+đậm+nghiêng, còn lại xám."""
+    chips = []
+    for sym in (affected_symbols or []):
+        if sym in user_symbols:
+            chips.append(
+                f'<span style="display:inline-block;background:#ECF2FF;color:#0849AC;'
+                f'font-size:11px;font-weight:700;font-style:italic;'
+                f'padding:3px 10px;border-radius:20px;margin:2px 3px 2px 0;">{sym}</span>'
+            )
+        else:
+            chips.append(
+                f'<span style="display:inline-block;background:#F3F4F6;color:#9CA3AF;'
+                f'font-size:11px;font-weight:600;'
+                f'padding:3px 10px;border-radius:20px;margin:2px 3px 2px 0;">{sym}</span>'
+            )
+    return ''.join(chips)
 
 
 def _news_item_html(news: dict, symbol: str = '') -> str:
@@ -141,11 +219,12 @@ def _news_item_html(news: dict, symbol: str = '') -> str:
     title     = news.get('title', '')
     url       = news.get('article_url', '#')
     source    = news.get('source', '')
-    summary   = (news.get('content_summary') or '').strip()
+    summary     = (news.get('content_summary') or '').strip()
     if not summary:
         _raw = (news.get('content') or '').strip()
         summary = (_raw[:200] + '...') if _raw else ''
-    reasoning = (news.get('impact_reasoning') or '').strip()
+    reasoning   = _extract_reasoning_for_symbol((news.get('impact_reasoning') or '').strip(), symbol)
+    alt_sources = news.get('_alt_sources') or []
 
     type_html = (
         f'<td style="padding-left:6px;">'
@@ -153,6 +232,21 @@ def _news_item_html(news: dict, symbol: str = '') -> str:
         f'padding:3px 8px;border-radius:20px;">{type_tag}</span></td>'
         if type_tag else ''
     )
+
+    # Source label: "CafeF · Markettimes" nếu có bài trùng
+    if alt_sources:
+        all_source_names = ' · '.join(filter(None, [source] + [s['source'] for s in alt_sources]))
+    else:
+        all_source_names = source
+
+    # "Đọc bài báo gốc" links — mỗi nguồn 1 link riêng
+    if alt_sources:
+        link_parts = [f'<a href="{url}" style="color:#0849AC;font-size:12px;font-weight:600;text-decoration:none;">{source or "Nguồn 1"}</a>']
+        for s in alt_sources:
+            link_parts.append(f'<a href="{s["url"]}" style="color:#0849AC;font-size:12px;font-weight:600;text-decoration:none;">{s["source"] or "Nguồn khác"}</a>')
+        read_html = f'<p style="margin:0 0 12px;">' + ' &nbsp;·&nbsp; '.join(link_parts) + '</p>'
+    else:
+        read_html = f'<p style="margin:0 0 12px;"><a href="{url}" style="color:#0849AC;font-size:12px;font-weight:600;text-decoration:none;">Đọc bài báo gốc</a></p>'
 
     deep_prompt = (
         f"Tóm tắt bài báo: {url}\n"
@@ -205,12 +299,122 @@ def _news_item_html(news: dict, symbol: str = '') -> str:
                     <tr>
                       <td style="background:{bg};color:{color};font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;">{badge}</td>
                       {type_html}
-                      <td style="padding-left:10px;color:#717182;font-size:11px;">{source}</td>
+                      <td style="padding-left:10px;color:#717182;font-size:11px;">{all_source_names}</td>
                     </tr>
                   </table>
                   <a href="{url}" style="color:#030213;font-size:14px;font-weight:600;text-decoration:none;line-height:1.5;display:block;margin-bottom:8px;">{title}</a>
                   <p style="margin:0 0 6px;color:#717182;font-size:13px;line-height:1.55;">{summary}</p>
-                  <p style="margin:0 0 12px;"><a href="{url}" style="color:#0849AC;font-size:12px;font-weight:600;text-decoration:none;">Đọc bài báo gốc →</a></p>
+                  {read_html}
+                  {bottom_block}
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>"""
+
+
+def _multi_news_item_html(news: dict, user_symbols: set) -> str:
+    """Card cho bài ảnh hưởng ≥2 cổ phiếu user đang giữ."""
+    import urllib.parse
+    label     = news.get('label', 'positive')
+    color     = LABEL_COLOR.get(label, '#2E7D32')
+    bg        = LABEL_BG.get(label, '#E8F5E9')
+    border    = LABEL_BORDER.get(label, '#2E7D32')
+    badge     = LABEL_VI.get(label, label.upper())
+    ntype     = news.get('news_type') or ''
+    type_tag  = NEWS_TYPE_VI.get(ntype, '')
+    title     = news.get('title', '')
+    url       = news.get('article_url', '#')
+    source    = news.get('source', '')
+    affected  = news.get('affected_symbols') or []
+    summary   = (news.get('content_summary') or '').strip()
+    if not summary:
+        _raw = (news.get('content') or '').strip()
+        summary = (_raw[:200] + '...') if _raw else ''
+    reasoning_raw = (news.get('impact_reasoning') or '').strip()
+    alt_sources   = news.get('_alt_sources') or []
+
+    type_html = (
+        f'<td style="padding-left:6px;">'
+        f'<span style="background:#F0F0F8;color:#5A5A7A;font-size:10px;font-weight:600;'
+        f'padding:3px 8px;border-radius:20px;">{type_tag}</span></td>'
+        if type_tag else ''
+    )
+
+    if alt_sources:
+        all_source_names = ' · '.join(filter(None, [source] + [s['source'] for s in alt_sources]))
+    else:
+        all_source_names = source
+
+    if alt_sources:
+        link_parts = [f'<a href="{url}" style="color:#0849AC;font-size:12px;font-weight:600;text-decoration:none;">{source or "Nguồn 1"}</a>']
+        for s in alt_sources:
+            link_parts.append(f'<a href="{s["url"]}" style="color:#0849AC;font-size:12px;font-weight:600;text-decoration:none;">{s["source"] or "Nguồn khác"}</a>')
+        read_html = '<p style="margin:0 0 12px;">' + ' &nbsp;·&nbsp; '.join(link_parts) + '</p>'
+    else:
+        read_html = f'<p style="margin:0 0 12px;"><a href="{url}" style="color:#0849AC;font-size:12px;font-weight:600;text-decoration:none;">Đọc bài báo gốc →</a></p>'
+
+    chips_html    = _affected_chips_html(affected, user_symbols)
+    reasoning_html = _reasoning_html_multi(reasoning_raw, user_symbols)
+
+    user_syms_affected = ', '.join(s for s in affected if s in user_symbols)
+    deep_prompt = (
+        f"Tóm tắt bài báo: {url}\n"
+        f"Phân tích tác động của tin này lên các cổ phiếu {user_syms_affected}.\n"
+        f"Bạn hãy research các thông tin cần thiết liên quan để tự cung cấp đủ context nhằm phân tích tin tức và cho tôi biết:\n"
+        f"- Tin ảnh hưởng trực tiếp hay gián tiếp?\n"
+        f"- Mức độ tác động (mạnh / vừa / yếu)\n"
+        f"- Ngắn hạn vs dài hạn\n"
+        f"- Thị trường đã phản ánh chưa?\n"
+        f"- Kết luận: bullish hay bearish (kèm reasoning)"
+    )
+    chatgpt_url = f"https://chatgpt.com/?q={urllib.parse.quote(deep_prompt)}"
+    chatgpt_btn = f"""
+                        <div style="margin-top:10px;">
+                          <a href="{chatgpt_url}" style="display:inline-flex;align-items:center;gap:6px;background:#0849AC;color:#ffffff;font-size:11px;font-weight:600;padding:7px 14px;border-radius:20px;text-decoration:none;">
+                            Research sâu hơn →
+                          </a>
+                        </div>"""
+
+    if reasoning_html:
+        bottom_block = f"""
+                  <table width="100%" cellpadding="0" cellspacing="0" style="background:#ECF2FF;border-radius:8px;">
+                    <tr>
+                      <td style="padding:12px 14px;">
+                        <p style="margin:0 0 8px;color:#0849AC;font-size:11px;font-weight:700;letter-spacing:0.5px;">AI REASONING</p>
+                        {reasoning_html}
+                        {chatgpt_btn}
+                      </td>
+                    </tr>
+                  </table>"""
+    else:
+        bottom_block = f"""
+                  <table width="100%" cellpadding="0" cellspacing="0" style="background:#F8F9FB;border-radius:8px;border:1px solid #ECECF0;">
+                    <tr>
+                      <td style="padding:12px 14px;">
+                        <p style="margin:0 0 8px;color:#9CA3AF;font-size:12px;font-style:italic;">Chưa có AI reasoning cho bài này.</p>
+                        {chatgpt_btn}
+                      </td>
+                    </tr>
+                  </table>"""
+
+    return f"""
+        <tr>
+          <td style="background:#ffffff;padding:8px 32px;">
+            <table width="100%" cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="background:#F8F9FB;border-radius:10px;border-left:4px solid {border};padding:16px;">
+                  <table cellpadding="0" cellspacing="0" style="margin-bottom:10px;">
+                    <tr>
+                      <td style="background:{bg};color:{color};font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;">{badge}</td>
+                      {type_html}
+                      <td style="padding-left:10px;color:#717182;font-size:11px;">{all_source_names}</td>
+                    </tr>
+                  </table>
+                  <a href="{url}" style="color:#030213;font-size:14px;font-weight:600;text-decoration:none;line-height:1.5;display:block;margin-bottom:8px;">{title}</a>
+                  <div style="margin-bottom:8px;">{chips_html}</div>
+                  <p style="margin:0 0 6px;color:#717182;font-size:13px;line-height:1.55;">{summary}</p>
+                  {read_html}
                   {bottom_block}
                 </td>
               </tr>
@@ -310,17 +514,56 @@ def build_email_html(email: str, holdings: list[dict], news_by_symbol: dict) -> 
           </td>
         </tr>"""
 
-    # Blocks tin tức theo từng cổ phiếu
-    holding_blocks = ''
+    # ── Phát hiện bài ảnh hưởng ≥2 cổ phiếu user đang giữ ──────────────────────
+    user_symbols_set = {h.get('symbol') for h in holdings if h.get('symbol')}
+    article_to_user_syms: dict = {}
+    article_by_id: dict        = {}
+    for _sym in user_symbols_set:
+        for _n in news_by_symbol.get(_sym, []):
+            _aid = _n['id']
+            article_by_id[_aid] = _n
+            article_to_user_syms.setdefault(_aid, set()).add(_sym)
+
+    multi_ids = {aid for aid, syms in article_to_user_syms.items() if len(syms) >= 2}
+    multi_articles = sorted(
+        [article_by_id[aid] for aid in multi_ids],
+        key=lambda x: abs(x.get('impact_score') or 0),
+        reverse=True,
+    )
+
+    # ── Section "Tin ảnh hưởng nhiều cổ phiếu" ──────────────────────────────────
+    multi_block = ''
+    if multi_articles:
+        multi_rows = ''.join(_multi_news_item_html(n, user_symbols_set) for n in multi_articles)
+        multi_block = f"""
+        <tr>
+          <td style="background:#ffffff;padding:20px 32px 8px;">
+            <table width="100%" cellpadding="0" cellspacing="0">
+              <tr>
+                <td>
+                  <span style="color:#030213;font-size:18px;font-weight:700;">Tin ảnh hưởng nhiều cổ phiếu</span>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        {multi_rows}
+        <tr>
+          <td style="background:#ffffff;padding:0 32px 16px;">
+            <div style="border-top:1px solid #ECECF0;"></div>
+          </td>
+        </tr>"""
+
+    # ── Per-symbol sections (loại bỏ bài đã hiển thị trong multi_block) ─────────
+    per_symbol_blocks = ''
     for holding in holdings:
         symbol    = holding.get('symbol', '')
         quantity  = holding.get('quantity', 0)
-        news_list = news_by_symbol.get(symbol, [])
+        news_list = [n for n in news_by_symbol.get(symbol, []) if n['id'] not in multi_ids]
         if not news_list:
             continue
-
         news_rows = ''.join(_news_item_html(n, symbol) for n in news_list)
-        holding_blocks += f"""
+        per_symbol_blocks += f"""
         <tr>
           <td style="background:#ffffff;padding:20px 32px 8px;">
             <table width="100%" cellpadding="0" cellspacing="0">
@@ -340,7 +583,9 @@ def build_email_html(email: str, holdings: list[dict], news_by_symbol: dict) -> 
           </td>
         </tr>"""
 
-    # Nếu không có tin nào cho bất kỳ cổ phiếu nào → block thông báo
+    holding_blocks = multi_block + per_symbol_blocks
+
+    # Nếu không có tin nào → block thông báo
     if not holding_blocks:
         symbol_list = ' · '.join(f'<strong>{s}</strong>' for s in symbols_without_news) if symbols_without_news else 'các cổ phiếu trong danh mục'
         holding_blocks = f"""
@@ -427,17 +672,65 @@ def build_email_html(email: str, holdings: list[dict], news_by_symbol: dict) -> 
 
         <!-- FOOTER -->
         <tr>
-          <td style="background:#0849AC;border-radius:0 0 12px 12px;padding:24px 32px;">
+          <td style="background:#0849AC;border-radius:0 0 12px 12px;padding:28px 32px 20px;">
             <table width="100%" cellpadding="0" cellspacing="0">
+
+              <!-- Brand -->
               <tr>
-                <td>
-                  <p style="margin:0 0 4px;color:#ffffff;font-size:13px;font-weight:600;">Wealbee</p>
-                  <p style="margin:0;color:rgba(255,255,255,0.6);font-size:12px;">Bản tin tự động · Không trả lời email này</p>
-                </td>
-                <td align="right" style="vertical-align:middle;">
-                  <a href="https://wealbee.app/unsubscribe?email={email}" style="color:rgba(255,255,255,0.6);font-size:12px;text-decoration:none;">Huỷ đăng ký</a>
+                <td align="center" style="padding-bottom:16px;">
+                  <p style="margin:0 0 3px;color:#ffffff;font-size:14px;font-weight:700;letter-spacing:0.3px;">Wealbee</p>
+                  <p style="margin:0;color:rgba(255,255,255,0.55);font-size:11px;">Bản tin tự động · Không trả lời email này</p>
                 </td>
               </tr>
+
+              <!-- Social icons -->
+              <tr>
+                <td align="center" style="padding-bottom:16px;">
+                  <table cellpadding="0" cellspacing="0">
+                    <tr>
+                      <!-- Trang chủ -->
+                      <td style="padding:0 6px;">
+                        <a href="https://wealbee.com" title="Trang chủ"
+                           style="display:inline-block;width:36px;height:36px;background:rgba(255,255,255,0.15);border-radius:50%;text-align:center;line-height:36px;text-decoration:none;font-size:16px;">
+                          🌐
+                        </a>
+                      </td>
+                      <!-- Facebook -->
+                      <td style="padding:0 6px;">
+                        <a href="https://www.facebook.com/people/Wealbee/61578427622563/" title="Facebook"
+                           style="display:inline-block;width:36px;height:36px;background:rgba(255,255,255,0.15);border-radius:50%;text-align:center;line-height:34px;text-decoration:none;color:#ffffff;font-size:18px;font-weight:900;font-family:Georgia,serif;">
+                          f
+                        </a>
+                      </td>
+                      <!-- TikTok -->
+                      <td style="padding:0 6px;">
+                        <a href="https://www.tiktok.com/@wealbee?is_from_webapp=1&amp;sender_device=pc" title="TikTok"
+                           style="display:inline-block;width:36px;height:36px;background:rgba(255,255,255,0.15);border-radius:50%;text-align:center;line-height:36px;text-decoration:none;color:#ffffff;font-size:10px;font-weight:700;letter-spacing:-0.3px;">
+                          TikTok
+                        </a>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+
+              <!-- Divider -->
+              <tr>
+                <td style="padding:0 0 14px;">
+                  <div style="border-top:1px solid rgba(255,255,255,0.15);"></div>
+                </td>
+              </tr>
+
+              <!-- Unsubscribe -->
+              <tr>
+                <td align="center">
+                  <a href="https://wealbee.app/unsubscribe?email={email}"
+                     style="color:rgba(255,255,255,0.45);font-size:11px;text-decoration:none;">
+                    Huỷ đăng ký
+                  </a>
+                </td>
+              </tr>
+
             </table>
           </td>
         </tr>
