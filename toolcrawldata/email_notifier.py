@@ -93,7 +93,7 @@ def fetch_news_for_symbol(sb, symbol: str, since_published: str, since_labeled: 
     # 1. Bài có symbol khớp trực tiếp
     r1 = (
         sb.table('market_news')
-        .select('id,title,content,article_url,label,source,published_at,news_type,affected_symbols,impact_reasoning,impact_score')
+        .select('id,title,content,content_summary,article_url,label,source,published_at,news_type,affected_symbols,impact_reasoning,impact_score')
         .eq('symbol', symbol)
         .in_('label', list(EMAIL_LABELS))
         .gte('published_at', since_published)
@@ -110,7 +110,7 @@ def fetch_news_for_symbol(sb, symbol: str, since_published: str, since_labeled: 
     if len(results) < 20:
         r2 = (
             sb.table('market_news')
-            .select('id,title,content,article_url,label,source,published_at,news_type,affected_symbols,impact_reasoning,impact_score')
+            .select('id,title,content,content_summary,article_url,label,source,published_at,news_type,affected_symbols,impact_reasoning,impact_score')
             .contains('affected_symbols', [symbol])
             .in_('label', list(EMAIL_LABELS))
             .gte('published_at', since_published)
@@ -141,10 +141,11 @@ def _news_item_html(news: dict, symbol: str = '') -> str:
     title     = news.get('title', '')
     url       = news.get('article_url', '#')
     source    = news.get('source', '')
-    content   = (news.get('content') or '')[:180].strip()
+    summary   = (news.get('content_summary') or '').strip()
+    if not summary:
+        _raw = (news.get('content') or '').strip()
+        summary = (_raw[:200] + '...') if _raw else ''
     reasoning = (news.get('impact_reasoning') or '').strip()
-    if content:
-        content += '...'
 
     type_html = (
         f'<td style="padding-left:6px;">'
@@ -208,7 +209,8 @@ def _news_item_html(news: dict, symbol: str = '') -> str:
                     </tr>
                   </table>
                   <a href="{url}" style="color:#030213;font-size:14px;font-weight:600;text-decoration:none;line-height:1.5;display:block;margin-bottom:8px;">{title}</a>
-                  <p style="margin:0 0 12px;color:#717182;font-size:13px;line-height:1.55;">{content}</p>
+                  <p style="margin:0 0 6px;color:#717182;font-size:13px;line-height:1.55;">{summary}</p>
+                  <p style="margin:0 0 12px;"><a href="{url}" style="color:#0849AC;font-size:12px;font-weight:600;text-decoration:none;">Đọc bài báo gốc →</a></p>
                   {bottom_block}
                 </td>
               </tr>

@@ -296,11 +296,16 @@ NGÔN NGỮ BẮT BUỘC:
 ✅ Dùng số cụ thể: ~25bps, 8-12%, 1.200 tỷ đồng, NIM, CASA, EBITDA margin, biên GP
 ❌ Tuyệt đối không dùng: "có thể", "có lẽ", "đáng lo ngại", "cần theo dõi", "đáng kể", "nhìn chung"
 
+## BƯỚC 6 — TÓM TẮT NỘI DUNG (content_summary)
+Viết 3-5 câu tóm tắt nội dung chính: sự kiện, số liệu quan trọng, bối cảnh liên quan.
+Ngắn gọn, súc tích, đủ để người đọc nắm nội dung mà không cần đọc bài gốc.
+Nếu trash: null.
+
 ## OUTPUT — JSON STRICT (không có text ngoài JSON)
 Nếu trash:
-{"trash":true,"news_type":null,"affected_symbols":null,"impact_score":null,"label":"trash","impact_reasoning":null}
+{"trash":true,"news_type":null,"affected_symbols":null,"impact_score":null,"label":"trash","impact_reasoning":null,"content_summary":null}
 Nếu không trash:
-{"trash":false,"news_type":"hoat_dong_kd","affected_symbols":["VNM"],"impact_score":-3.5,"label":"negative","impact_reasoning":"Câu 1. Câu 2."}"""
+{"trash":false,"news_type":"hoat_dong_kd","affected_symbols":["VNM"],"impact_score":-3.5,"label":"negative","impact_reasoning":"Câu 1. Câu 2.","content_summary":"Tóm tắt 3-5 câu."}"""
 
         VALID_LABELS = {'very_positive', 'positive', 'neutral', 'negative', 'very_negative', 'trash'}
         VALID_TYPES  = {'vi_mo', 'vi_mo_dn', 'hoat_dong_kd', 'phap_ly', 'thi_truong', 'du_bao'}
@@ -344,7 +349,7 @@ Nếu không trash:
                 return article['id'], {
                     'label': 'trash', 'news_type': None,
                     'affected_symbols': None, 'impact_score': None,
-                    'impact_reasoning': None,
+                    'impact_reasoning': None, 'content_summary': None,
                 }
 
             symbol      = article.get('symbol') or ''
@@ -365,7 +370,7 @@ Nếu không trash:
                         {'role': 'system', 'content': SYSTEM_PROMPT},
                         {'role': 'user',   'content': user_text},
                     ],
-                    max_tokens=300,
+                    max_tokens=600,
                     temperature=0,
                     response_format={'type': 'json_object'},
                 )
@@ -375,7 +380,7 @@ Nếu không trash:
                     return article['id'], {
                         'label': 'trash', 'news_type': None,
                         'affected_symbols': None, 'impact_score': None,
-                        'impact_reasoning': None,
+                        'impact_reasoning': None, 'content_summary': None,
                     }
 
                 score    = data.get('impact_score')
@@ -383,6 +388,7 @@ Nếu không trash:
                 ntype    = data.get('news_type', 'thi_truong')
                 affected = data.get('affected_symbols') or []
                 reasoning = (data.get('impact_reasoning') or '').strip()
+                summary   = (data.get('content_summary') or '').strip()
 
                 if label not in VALID_LABELS:
                     label = 'neutral'
@@ -398,6 +404,7 @@ Nếu không trash:
                     'affected_symbols': affected,
                     'impact_score':     float(score) if isinstance(score, (int, float)) else None,
                     'impact_reasoning': reasoning or None,
+                    'content_summary':  summary or None,
                 }
 
             except Exception as e:
@@ -413,7 +420,7 @@ Nếu không trash:
                                 {'role': 'system', 'content': SYSTEM_PROMPT},
                                 {'role': 'user',   'content': user_text},
                             ],
-                            max_tokens=300,
+                            max_tokens=600,
                             temperature=0,
                             response_format={'type': 'json_object'},
                         )
@@ -422,13 +429,14 @@ Nếu không trash:
                             return article['id'], {
                                 'label': 'trash', 'news_type': None,
                                 'affected_symbols': None, 'impact_score': None,
-                                'impact_reasoning': None,
+                                'impact_reasoning': None, 'content_summary': None,
                             }
                         score     = data.get('impact_score')
                         label     = score_to_label(float(score)) if isinstance(score, (int, float)) else data.get('label', 'neutral')
                         ntype     = data.get('news_type', 'thi_truong')
                         affected  = data.get('affected_symbols') or []
                         reasoning = (data.get('impact_reasoning') or '').strip()
+                        summary   = (data.get('content_summary') or '').strip()
                         if label not in VALID_LABELS:
                             label = 'neutral'
                         if ntype not in VALID_TYPES:
@@ -441,6 +449,7 @@ Nếu không trash:
                             'affected_symbols': affected,
                             'impact_score': float(score) if isinstance(score, (int, float)) else None,
                             'impact_reasoning': reasoning or None,
+                            'content_summary':  summary or None,
                         }
                     except Exception as e2:
                         log.warning(f'  Retry that bai sau rate limit {article["id"][:8]}: {e2}')
@@ -455,7 +464,7 @@ Nếu không trash:
                                 {'role': 'system', 'content': SYSTEM_PROMPT},
                                 {'role': 'user',   'content': user_text},
                             ],
-                            max_tokens=300,
+                            max_tokens=600,
                             temperature=0,
                             response_format={'type': 'json_object'},
                         )
@@ -464,13 +473,14 @@ Nếu không trash:
                             return article['id'], {
                                 'label': 'trash', 'news_type': None,
                                 'affected_symbols': None, 'impact_score': None,
-                                'impact_reasoning': None,
+                                'impact_reasoning': None, 'content_summary': None,
                             }
                         score     = data.get('impact_score')
                         label     = score_to_label(float(score)) if isinstance(score, (int, float)) else data.get('label', 'neutral')
                         ntype     = data.get('news_type', 'thi_truong')
                         affected  = data.get('affected_symbols') or []
                         reasoning = (data.get('impact_reasoning') or '').strip()
+                        summary   = (data.get('content_summary') or '').strip()
                         if label not in VALID_LABELS:
                             label = 'neutral'
                         if ntype not in VALID_TYPES:
@@ -483,6 +493,7 @@ Nếu không trash:
                             'affected_symbols': affected,
                             'impact_score': float(score) if isinstance(score, (int, float)) else None,
                             'impact_reasoning': reasoning or None,
+                            'content_summary':  summary or None,
                         }
                     except Exception as e2:
                         log.warning(f'  Retry that bai sau connection error {article["id"][:8]}: {e2}')
@@ -490,7 +501,7 @@ Nếu không trash:
                 return article['id'], {
                     'label': 'neutral', 'news_type': 'thi_truong',
                     'affected_symbols': [], 'impact_score': None,
-                    'impact_reasoning': None,
+                    'impact_reasoning': None, 'content_summary': None,
                 }
 
         total = 0
