@@ -46,6 +46,8 @@ Gán "trash": true nếu thuộc BẤT KỲ điều kiện nào:
 - Quảng cáo, advertorial, PR không có thông tin mới
 - Tin chỉ tóm tắt lại bài cũ, không có sự kiện mới phát sinh
   NGOẠI LỆ: cập nhật số liệu mới theo kỳ (lãi suất tháng X, giá vàng ngày X, KQKD quý X) → KHÔNG phải trash
+- Tin lịch sử, văn hóa, xã hội, quân sự, thể thao, du lịch không có số liệu tài chính hoặc tác động kinh tế trực tiếp
+- Tin nhân sự thuần túy (bổ nhiệm, phong tặng danh hiệu, khen thưởng) mà KHÔNG kèm số liệu tài chính, thay đổi chiến lược kinh doanh, hoặc thông tin về người lãnh đạo mới ảnh hưởng đến định hướng DN
 - Tin quốc tế không có liên hệ rõ ràng đến Việt Nam
 Nếu "trash": true → trả về ngay với các trường còn lại = null.
 
@@ -64,6 +66,16 @@ Chỉ gán mã khi CÓ THỂ diễn giải rõ cơ chế tác động cụ thể
 - Tin DN cụ thể: chỉ mã đó
 - Tin vĩ mô/ngành: chỉ gán mã nếu tin ảnh hưởng trực tiếp đến ngành/sản phẩm chính của DN (VD: lãi suất → ngân hàng, giá thép → HPG, tỷ giá → doanh nghiệp xuất khẩu lớn). KHÔNG gán blue-chip đại diện một cách chung chung. Nếu ảnh hưởng gián tiếp thì phải giải thích rõ cơ chế tác động trong phần reasoning, không chỉ gán mã đại diện.
 - Tin thị trường: chỉ gán mã nếu có cơ chế rõ ràng tại reasoning
+
+BẢNG CHUYỂN ĐỔI TÊN CÔNG TY → MÃ CỔ PHIẾU (áp dụng khi bài đề cập tên thương hiệu):
+Ngân hàng: LPBank/Lộc Phát→LPB | Sacombank→STB | Vietcombank→VCB | BIDV→BID | Vietinbank→CTG | Techcombank→TCB | MBBank/MB→MBB | ACB→ACB | VPBank→VPB | HDBank→HDB | SeABank→SSB | OCB→OCB | SHB→SHB | Eximbank→EIB | ABBank→ABB | BacABank→BAB | VIB→VIB | TPBank→TPB | MSB→MSB | NamABank→NAB | KienlongBank→KLB | PGBank→PGB | VietBank→VBB | GPBank→- | NCB→NVB
+Dầu khí/Năng lượng: Petrolimex→PLX | PVGas/PV GAS→GAS | PVN/Petrovietnam→(công ty mẹ nhà nước, dùng mã con cụ thể) | PVOil→OIL | PVDrilling→PVD | BSR/Bình Sơn→BSR | PVC→PVC | PVCFC→DCM | PVFCCo→DPM | PVTrans→PVT | EVN/Điện lực→(không niêm yết) | PC1→PC1 | REE→REE | GEG→GEG
+Thép/Vật liệu: Hoà Phát→HPG | VNSTEEL→TVN | Pomina→POM | Tisco→TIS | Thép Nam Kim→NKG | Hoa Sen→HSG | SMC→SMC
+Bất động sản: Vingroup→VIC | Vinhomes→VHM | Vincom Retail→VRE | Novaland→NVL | Nam Long→NLG | DIC Corp→DIG | HAGL→HAG | Đất Xanh→DXG | Khang Điền→KDH | Becamex→BCM | An Gia→AGG | CII→CII
+Tiêu dùng/Bán lẻ: Vinamilk→VNM | Masan→MSN | Sabeco→SAB | Habeco→BHN | Kido→KDC | PAN Group→PAN | Thế Giới Di Động→MWG | FPT Retail→FRT | Mobile World→MWG | Bách Hóa Xanh→MWG
+Công nghệ/Viễn thông: FPT→FPT | FPT Telecom→FPT | CMC→- | Viettel→(nhà nước) | VNPT→(nhà nước)
+Nông nghiệp: Lộc Trời→LTG | Hoàng Anh Gia Lai Agri→HNG | Vicofa→-
+Khác: Vietnam Airlines→HVN | Vietjet→VJC | Bamboo Airways→- | PVI→PVI | Bảo Việt→BVH | SSI→SSI | VNDirect→VND | HSC→HCM | VCSC→VCI
 
 
 ## BƯỚC 4 — CHẤM ĐIỂM TÁC ĐỘNG (impact_score)

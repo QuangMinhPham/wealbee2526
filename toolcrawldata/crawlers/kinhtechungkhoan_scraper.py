@@ -1,9 +1,7 @@
 """
 Kinh Te Chung Khoan Scraper
-Crawl tin tức từ kinhtechungkhoan.vn — chứng khoán, vĩ mô, doanh nghiệp.
+Crawl tin tức từ kinhtechungkhoan.vn
 Upsert vào bảng market_news trên Supabase.
-
-Chạy: python3 kinhtechungkhoan_scraper.py
 """
 
 import sys
@@ -23,37 +21,39 @@ from bs4 import BeautifulSoup
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from supabase_writer import get_client, upsert_batch
 
-# ── Cấu hình ──────────────────────────────────────────────────────────────────
-LOOKBACK_DAYS = 2
-MAX_PAGES     = 8
+LOOKBACK_DAYS = 1
 WORKERS       = 4
 CONTENT_DELAY = 0.3
+SITE_URL      = "https://kinhtechungkhoan.vn"
 
-SITE_URL = "https://kinhtechungkhoan.vn"
-
-# Các chuyên mục chứng khoán / tài chính / doanh nghiệp
+# Không có pagination URL (dùng JS "Xem thêm") — scrape listing page
 CATEGORIES = [
     "chung-khoan",
     "vi-mo",
     "doanh-nghiep",
     "tai-chinh",
+    "tin-moi-nhat",
 ]
 
 HEADERS = {
-    "User-Agent":      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36",
-    "Accept-Language": "vi-VN,vi;q=0.9",
+    "User-Agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "vi-VN,vi;q=0.9,en;q=0.8",
     "Referer":         SITE_URL + "/",
 }
 
 _lock = threading.Lock()
 _done = 0
 
+# Article URL pattern: /slug-1445656.html (ID ≥ 7 chữ số)
+_ART_RE = re.compile(r'kinhtechungkhoan\.vn/[a-z0-9][a-z0-9\-]+-\d{7,}\.html$')
+
 
 def parse_date(text: str) -> datetime | None:
     if not text:
         return None
     today = date.today()
-    # ISO 8601
+    # ISO: 2026-05-09T09:27
     m = re.search(r'(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})', text)
     if m:
         try:
@@ -63,8 +63,8 @@ def parse_date(text: str) -> datetime | None:
                 return dt
         except ValueError:
             pass
-    # dd/mm/yyyy HH:MM
-    m = re.search(r'(\d{1,2})[/-](\d{1,2})[/-](\d{4})[\s\-,]+(\d{1,2}):(\d{2})', text)
+    # "09/05/2026 09:27"
+    m = re.search(r'(\d{1,2})[/-](\d{1,2})[/-](\d{4})[\s,\-]+(\d{1,2}):(\d{2})', text)
     if m:
         try:
             dt = datetime(int(m.group(3)), int(m.group(2)), int(m.group(1)),
@@ -73,106 +73,44 @@ def parse_date(text: str) -> datetime | None:
                 return dt
         except ValueError:
             pass
-    # dd/mm/yyyy
-    m = re.search(r'(\d{1,2})[/-](\d{1,2})[/-](\d{4})', text)
-    if m:
-        try:
-            dt = datetime(int(m.group(3)), int(m.group(2)), int(m.group(1)))
-            if dt.date() <= today:
-                return dt
-        except ValueError:
-            pass
     return None
 
-
-# ── Bước 1: Scrape danh sách bài ─────────────────────────────────────────────
 
 def scrape_category(session: requests.Session, slug: str, cutoff: date) -> list[dict]:
     articles = []
     seen_urls: set[str] = set()
+    url = f"{SITE_URL}/{slug}"
 
-    for page in range(1, MAX_PAGES + 1):
-        if page == 1:
-            url = f"{SITE_URL}/{slug}"
-        else:
-            url = f"{SITE_URL}/{slug}/page/{page}"
+    try:
+        resp = session.get(url, headers=HEADERS, timeout=15)
+        resp.raise_for_status()
+        resp.encoding = "utf-8"
+        soup = BeautifulSoup(resp.text, "html.parser")
+    except Exception as e:
+        print(f"  [!] {slug} lỗi: {e}")
+        return articles
 
-        try:
-            resp = session.get(url, headers=HEADERS, timeout=15)
-            if resp.status_code == 404:
-                break
-            resp.raise_for_status()
-            resp.encoding = "utf-8"
-            soup = BeautifulSoup(resp.text, "html.parser")
-        except Exception as e:
-            print(f"  [!] {slug} p{page} lỗi: {e}")
-            break
+    for a_tag in soup.find_all("a", href=_ART_RE):
+        href = a_tag.get("href", "")
+        if not href.startswith("http"):
+            href = SITE_URL + href
+        if href in seen_urls:
+            continue
 
-        found = 0
-        stop  = False
+        title = (a_tag.get("title") or a_tag.get_text(strip=True)).strip()
+        if not title or len(title) < 10:
+            continue
 
-        # kinhtechungkhoan.vn dùng pattern: /ten-bai-viet-12345/ hoặc /ten-bai-12345.html
-        for a_tag in soup.find_all("a", href=True):
-            href = a_tag.get("href", "")
-            if not href:
-                continue
-            if not re.search(r'-\d{4,}[/.]', href) and not re.search(r'-\d{4,}$', href):
-                continue
-            if not href.startswith("http"):
-                href = SITE_URL + href
-            if not href.startswith(SITE_URL):
-                continue
-            # Bỏ qua category/tag links
-            if re.search(r'/(category|tag|chuyen-muc)/', href):
-                continue
-            if href in seen_urls:
-                continue
+        seen_urls.add(href)
+        articles.append({
+            "title":        title,
+            "content":      "",
+            "source":       "kinhtechungkhoan",
+            "article_url":  href,
+            "published_at": None,
+        })
 
-            title = (a_tag.get("title") or a_tag.get_text(strip=True)).strip()
-            if not title or len(title) < 10:
-                continue
-
-            # Tìm ngày từ DOM gần thẻ a
-            pub_dt = None
-            parent = a_tag.parent
-            for _ in range(3):
-                if parent is None:
-                    break
-                for candidate in parent.find_all(["time", "span", "p", "div"], limit=10):
-                    cls = " ".join(candidate.get("class", []))
-                    dt_attr = candidate.get("datetime") or candidate.get("content")
-                    if dt_attr:
-                        pub_dt = parse_date(dt_attr)
-                        if pub_dt:
-                            break
-                    if any(kw in cls.lower() for kw in ("date", "time", "pub", "post")):
-                        pub_dt = parse_date(candidate.get_text(strip=True))
-                        if pub_dt:
-                            break
-                if pub_dt:
-                    break
-                parent = parent.parent
-
-            if pub_dt and pub_dt.date() < cutoff:
-                stop = True
-                break
-
-            seen_urls.add(href)
-            articles.append({
-                "title":        title,
-                "content":      "",
-                "source":       "kinhtechungkhoan",
-                "article_url":  href,
-                "published_at": pub_dt,
-            })
-            found += 1
-
-        print(f"    [{slug}] trang {page}: +{found} bài (tổng: {len(articles)})")
-
-        if stop or found == 0:
-            break
-        time.sleep(0.5)
-
+    print(f"    [{slug}]: {len(articles)} bài")
     return articles
 
 
@@ -185,18 +123,15 @@ def scrape_all(lookback_days: int = LOOKBACK_DAYS) -> list[dict]:
     print(f"  KinhTeChungKhoan: lấy bài từ {cutoff.strftime('%d/%m/%Y')}")
 
     for slug in CATEGORIES:
-        arts = scrape_category(session, slug, cutoff)
-        for a in arts:
+        for a in scrape_category(session, slug, cutoff):
             url = a.get("article_url")
             if url and url not in seen_urls:
                 seen_urls.add(url)
                 all_articles.append(a)
 
-    print(f"  Tổng: {len(all_articles)} bài unique")
+    print(f"  Tổng listing: {len(all_articles)} bài unique")
     return all_articles
 
-
-# ── Bước 2: Enrich nội dung ───────────────────────────────────────────────────
 
 def fetch_content(idx: int, article: dict) -> tuple[int, dict]:
     global _done
@@ -209,6 +144,28 @@ def fetch_content(idx: int, article: dict) -> tuple[int, dict]:
         resp.encoding = "utf-8"
         soup = BeautifulSoup(resp.text, "html.parser")
 
+        # Date: meta → time[datetime] → span trong header bài viết
+        pub_dt = None
+        meta = soup.select_one("meta[property='article:published_time'], meta[name='pubdate']")
+        if meta:
+            pub_dt = parse_date(meta.get("content", ""))
+        if not pub_dt:
+            t = soup.select_one("time[datetime]")
+            if t:
+                pub_dt = parse_date(t.get("datetime", ""))
+        if not pub_dt:
+            # "09/05/2026 09:27" xuất hiện trong span gần title
+            for el in soup.select("span, div.date, div.time, p.date"):
+                pub_dt = parse_date(el.get_text(strip=True))
+                if pub_dt:
+                    break
+        if not pub_dt:
+            body_text = soup.get_text(" ", strip=True)[:500]
+            pub_dt = parse_date(body_text)
+        if pub_dt:
+            article["published_at"] = pub_dt
+
+        # Content
         content_tag = (
             soup.select_one(".detail-content")
             or soup.select_one(".article-content")
@@ -218,26 +175,10 @@ def fetch_content(idx: int, article: dict) -> tuple[int, dict]:
             or soup.select_one("article")
         )
         if content_tag:
-            for junk in content_tag.select("script, style, .ads, [class*=ads], .relate, .social, .tags"):
+            for junk in content_tag.select("script,style,.ads,[class*=ads],.relate,.tags,.social"):
                 junk.decompose()
             paras = content_tag.select("p")
             article["content"] = "\n\n".join(p.get_text(strip=True) for p in paras if p.get_text(strip=True))
-
-        # Parse ngày từ trang bài viết
-        for sel in [
-            "meta[property='article:published_time']",
-            "meta[name='pubdate']",
-            "time[datetime]",
-            "span.date", "span.time", "span.post-date",
-            ".entry-date", ".publish-date",
-        ]:
-            tag = soup.select_one(sel)
-            if tag:
-                dt_str = tag.get("datetime") or tag.get("content") or tag.get_text(strip=True)
-                pub_dt = parse_date(dt_str)
-                if pub_dt:
-                    article["published_at"] = pub_dt
-                    break
 
         time.sleep(CONTENT_DELAY)
     except Exception:
@@ -256,18 +197,14 @@ def enrich_content(articles: list[dict]) -> list[dict]:
     _done = 0
     if not articles:
         return articles
-
-    print(f"  Enrich nội dung {len(articles)} bài ({WORKERS} luồng)...")
-    with ThreadPoolExecutor(max_workers=WORKERS) as executor:
-        futures = {executor.submit(fetch_content, i, a): i for i, a in enumerate(articles)}
-        for future in as_completed(futures):
-            idx, enriched = future.result()
+    print(f"  Enrich {len(articles)} bài ({WORKERS} luồng)...")
+    with ThreadPoolExecutor(max_workers=WORKERS) as ex:
+        futures = {ex.submit(fetch_content, i, a): i for i, a in enumerate(articles)}
+        for f in as_completed(futures):
+            idx, enriched = f.result()
             articles[idx] = enriched
-
     return articles
 
-
-# ── Bước 3: Upsert Supabase ───────────────────────────────────────────────────
 
 def upsert_to_supabase(articles: list[dict]) -> int:
     if not articles:
@@ -300,9 +237,7 @@ def run(lookback_days: int = LOOKBACK_DAYS) -> int:
     return upsert_to_supabase(articles)
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
-
 if __name__ == "__main__":
-    print(f"\nKINHTECHUNGKHOAN SCRAPER — {datetime.now().strftime('%H:%M:%S')}\n")
-    total = run(lookback_days=LOOKBACK_DAYS)
+    print(f"\nKINHTECHUNGKHOAN — {datetime.now().strftime('%H:%M:%S')}\n")
+    total = run()
     print(f"\nHOAN THANH — {total} bai da luu")
