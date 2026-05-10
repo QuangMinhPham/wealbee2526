@@ -55,7 +55,7 @@ def step_header(step: int, title: str):
 
 def run_crawl() -> list[str]:
     """
-    Crawl VnExpress + Vietstock trong 24h gần nhất.
+    Crawl Vietstock + Markettimes + ThoiBaoTaiChinhVN + BaoDauTu + KinhTeChungKhoan trong 24h gần nhất.
     Upsert theo article_url → không trùng lặp.
     Trả về list ID các bài vừa được INSERT mới (không phải update).
     """
@@ -80,34 +80,6 @@ def run_crawl() -> list[str]:
     log.info(f'  Da co {len(existing_urls)} bai trong 24h qua')
 
     all_new_urls = []
-
-    # VnExpress
-    try:
-        import importlib.util
-        spec = importlib.util.spec_from_file_location('vnexpress_scraper', CRAWLERS_DIR / 'vnexpress_scraper.py')
-        mod  = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-
-        mod.START_DATE = date.today() - timedelta(days=1)
-        mod.MAX_PAGES  = 10
-        mod.WORKERS    = 5
-
-        articles = mod.scrape_article_list()
-        if articles:
-            articles = mod.enrich_content(articles)
-            cutoff = datetime.now() - timedelta(hours=28)
-            articles = [a for a in articles if a.get('_dt') and a['_dt'] >= cutoff]
-            new_articles = [
-                a for a in articles
-                if a.get('article_url') and a['article_url'] not in existing_urls
-            ]
-            mod.upsert_to_supabase(articles)
-            all_new_urls += [a['article_url'] for a in new_articles if a.get('article_url')]
-            log.info(f'  VnExpress: {len(articles)} bai trong 24h, {len(new_articles)} bai INSERT moi')
-        else:
-            log.warning('  VnExpress: khong co bai nao')
-    except Exception as e:
-        log.error(f'  VnExpress loi: {e}')
 
     # Nguoi Quan Sat — bị Cloudflare block trên datacenter IP (GitHub Actions)
     # log.warning('  NguoiQuanSat: skip (Cloudflare block)')
@@ -136,30 +108,22 @@ def run_crawl() -> list[str]:
     except Exception as e:
         log.error(f'  Vietstock loi: {e}')
 
-    # CafeF
-    try:
-        import importlib.util
-        spec = importlib.util.spec_from_file_location('cafef_scraper', CRAWLERS_DIR / 'cafef_scraper.py')
-        mod  = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-
-        mod.LOOKBACK_DAYS = 2
-        mod.MAX_PAGES     = 5
-        mod.WORKERS       = 5
-
-        articles = mod.scrape_all()
-        if articles:
-            articles = mod.enrich_content(articles)
-            cutoff = datetime.now() - timedelta(hours=28)
-            articles = [a for a in articles if a.get('published_at') and datetime.fromisoformat(str(a['published_at'])) >= cutoff]
-            new_articles = [a for a in articles if a.get('article_url') and a['article_url'] not in existing_urls]
-            mod.upsert_to_supabase(articles)
-            all_new_urls += [a['article_url'] for a in new_articles if a.get('article_url')]
-            log.info(f'  CafeF: {len(articles)} bai trong 24h, {len(new_articles)} bai INSERT moi')
-        else:
-            log.warning('  CafeF: khong co bai nao')
-    except Exception as e:
-        log.error(f'  CafeF loi: {e}')
+    # CafeF — disabled (kept for reference)
+    # try:
+    #     spec = importlib.util.spec_from_file_location('cafef_scraper', CRAWLERS_DIR / 'cafef_scraper.py')
+    #     mod  = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+    #     mod.LOOKBACK_DAYS = 2; mod.MAX_PAGES = 5; mod.WORKERS = 5
+    #     articles = mod.scrape_all()
+    #     if articles:
+    #         articles = mod.enrich_content(articles)
+    #         cutoff = datetime.now() - timedelta(hours=28)
+    #         articles = [a for a in articles if a.get('published_at') and datetime.fromisoformat(str(a['published_at'])) >= cutoff]
+    #         new_articles = [a for a in articles if a.get('article_url') and a['article_url'] not in existing_urls]
+    #         mod.upsert_to_supabase(articles)
+    #         all_new_urls += [a['article_url'] for a in new_articles if a.get('article_url')]
+    #         log.info(f'  CafeF: {len(articles)} bai trong 24h, {len(new_articles)} bai INSERT moi')
+    # except Exception as e:
+    #     log.error(f'  CafeF loi: {e}')
 
     # Markettimes
     try:
@@ -187,6 +151,81 @@ def run_crawl() -> list[str]:
             log.warning('  Markettimes: khong co bai nao')
     except Exception as e:
         log.error(f'  Markettimes loi: {e}')
+
+    # ThoiBaoTaiChinhVietNam
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('thoibaotaichinhvietnam_scraper', CRAWLERS_DIR / 'thoibaotaichinhvietnam_scraper.py')
+        mod  = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        mod.LOOKBACK_DAYS = 2
+        mod.MAX_PAGES     = 5
+        mod.WORKERS       = 4
+
+        articles = mod.scrape_all()
+        if articles:
+            articles = mod.enrich_content(articles)
+            cutoff = datetime.now() - timedelta(hours=28)
+            articles = [a for a in articles if a.get('published_at') and datetime.fromisoformat(str(a['published_at'])) >= cutoff]
+            new_articles = [a for a in articles if a.get('article_url') and a['article_url'] not in existing_urls]
+            mod.upsert_to_supabase(articles)
+            all_new_urls += [a['article_url'] for a in new_articles if a.get('article_url')]
+            log.info(f'  ThoiBaoTaiChinhVN: {len(articles)} bai trong 24h, {len(new_articles)} bai INSERT moi')
+        else:
+            log.warning('  ThoiBaoTaiChinhVN: khong co bai nao')
+    except Exception as e:
+        log.error(f'  ThoiBaoTaiChinhVN loi: {e}')
+
+    # BaoDauTu
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('baodautu_scraper', CRAWLERS_DIR / 'baodautu_scraper.py')
+        mod  = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        mod.LOOKBACK_DAYS = 2
+        mod.MAX_PAGES     = 5
+        mod.WORKERS       = 4
+
+        articles = mod.scrape_all()
+        if articles:
+            articles = mod.enrich_content(articles)
+            cutoff = datetime.now() - timedelta(hours=28)
+            articles = [a for a in articles if a.get('published_at') and datetime.fromisoformat(str(a['published_at'])) >= cutoff]
+            new_articles = [a for a in articles if a.get('article_url') and a['article_url'] not in existing_urls]
+            mod.upsert_to_supabase(articles)
+            all_new_urls += [a['article_url'] for a in new_articles if a.get('article_url')]
+            log.info(f'  BaoDauTu: {len(articles)} bai trong 24h, {len(new_articles)} bai INSERT moi')
+        else:
+            log.warning('  BaoDauTu: khong co bai nao')
+    except Exception as e:
+        log.error(f'  BaoDauTu loi: {e}')
+
+    # KinhTeChungKhoan
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('kinhtechungkhoan_scraper', CRAWLERS_DIR / 'kinhtechungkhoan_scraper.py')
+        mod  = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        mod.LOOKBACK_DAYS = 2
+        mod.MAX_PAGES     = 5
+        mod.WORKERS       = 4
+
+        articles = mod.scrape_all()
+        if articles:
+            articles = mod.enrich_content(articles)
+            cutoff = datetime.now() - timedelta(hours=28)
+            articles = [a for a in articles if a.get('published_at') and datetime.fromisoformat(str(a['published_at'])) >= cutoff]
+            new_articles = [a for a in articles if a.get('article_url') and a['article_url'] not in existing_urls]
+            mod.upsert_to_supabase(articles)
+            all_new_urls += [a['article_url'] for a in new_articles if a.get('article_url')]
+            log.info(f'  KinhTeChungKhoan: {len(articles)} bai trong 24h, {len(new_articles)} bai INSERT moi')
+        else:
+            log.warning('  KinhTeChungKhoan: khong co bai nao')
+    except Exception as e:
+        log.error(f'  KinhTeChungKhoan loi: {e}')
 
     all_new_urls = [u for u in all_new_urls if u]
     log.info(f'  Tong bai INSERT moi: {len(all_new_urls)}')
