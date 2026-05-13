@@ -207,6 +207,16 @@ def _affected_chips_html(affected_symbols: list, user_symbols: set) -> str:
     return ''.join(chips)
 
 
+def _utm_url(url: str, campaign: str = 'daily', content: str = '') -> str:
+    """Thêm UTM params vào link để PostHog track click từ email."""
+    import urllib.parse
+    params = {'utm_source': 'email', 'utm_medium': 'digest', 'utm_campaign': campaign}
+    if content:
+        params['utm_content'] = content
+    sep = '&' if '?' in url else '?'
+    return url + sep + urllib.parse.urlencode(params)
+
+
 def _news_item_html(news: dict, symbol: str = '') -> str:
     import urllib.parse
     label     = news.get('label', 'positive')
@@ -217,7 +227,7 @@ def _news_item_html(news: dict, symbol: str = '') -> str:
     ntype     = news.get('news_type') or ''
     type_tag  = NEWS_TYPE_VI.get(ntype, '')
     title     = news.get('title', '')
-    url       = news.get('article_url', '#')
+    url       = _utm_url(news.get('article_url', '#'), content=f"article_{symbol.lower()}")
     source    = news.get('source', '')
     summary     = (news.get('content_summary') or '').strip()
     if not summary:
@@ -324,7 +334,7 @@ def _multi_news_item_html(news: dict, user_symbols: set) -> str:
     ntype     = news.get('news_type') or ''
     type_tag  = NEWS_TYPE_VI.get(ntype, '')
     title     = news.get('title', '')
-    url       = news.get('article_url', '#')
+    url       = _utm_url(news.get('article_url', '#'), content='article_multi')
     source    = news.get('source', '')
     affected  = news.get('affected_symbols') or []
     summary   = (news.get('content_summary') or '').strip()
@@ -690,7 +700,7 @@ def build_email_html(email: str, holdings: list[dict], news_by_symbol: dict) -> 
                     <tr>
                       <!-- Trang chủ -->
                       <td style="padding:0 6px;">
-                        <a href="https://wealbee.com" title="Trang chủ"
+                        <a href="{_utm_url('https://wealbee.com', content='footer_home')}" title="Trang chủ"
                            style="display:inline-block;width:36px;height:36px;background:rgba(255,255,255,0.15);border-radius:50%;text-align:center;line-height:36px;text-decoration:none;font-size:16px;">
                           🌐
                         </a>
@@ -724,7 +734,7 @@ def build_email_html(email: str, holdings: list[dict], news_by_symbol: dict) -> 
               <!-- Unsubscribe -->
               <tr>
                 <td align="center">
-                  <a href="https://wealbee.app/unsubscribe?email={email}"
+                  <a href="https://wealbee.com/unsubscribe?email={email}"
                      style="color:rgba(255,255,255,0.45);font-size:11px;text-decoration:none;">
                     Huỷ đăng ký
                   </a>

@@ -249,6 +249,78 @@ def run_crawl() -> list[str]:
     except Exception as e:
         log.error(f'  Stockbiz loi: {e}')
 
+    # ThoiBaoNganHang
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('thoibaonganhang_scraper', CRAWLERS_DIR / 'thoibaonganhang_scraper.py')
+        mod  = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        mod.LOOKBACK_DAYS = 1
+        mod.WORKERS       = 4
+
+        articles = mod.scrape_all()
+        if articles:
+            articles = mod.enrich_content(articles)
+            cutoff = datetime.now() - timedelta(hours=28)
+            articles = [a for a in articles if a.get('published_at') and datetime.fromisoformat(str(a['published_at'])) >= cutoff]
+            new_articles = [a for a in articles if a.get('article_url') and a['article_url'] not in existing_urls]
+            mod.upsert_to_supabase(articles)
+            all_new_urls += [a['article_url'] for a in new_articles if a.get('article_url')]
+            log.info(f'  ThoiBaoNganHang: {len(articles)} bai trong 24h, {len(new_articles)} bai INSERT moi')
+        else:
+            log.warning('  ThoiBaoNganHang: khong co bai nao')
+    except Exception as e:
+        log.error(f'  ThoiBaoNganHang loi: {e}')
+
+    # VnEconomy
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('vneconomy_scraper', CRAWLERS_DIR / 'vneconomy_scraper.py')
+        mod  = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        mod.LOOKBACK_DAYS = 1
+        mod.WORKERS       = 4
+
+        articles = mod.scrape_all()
+        if articles:
+            articles = mod.enrich_content(articles)
+            cutoff = datetime.now() - timedelta(hours=28)
+            articles = [a for a in articles if a.get('published_at') and datetime.fromisoformat(str(a['published_at'])) >= cutoff]
+            new_articles = [a for a in articles if a.get('article_url') and a['article_url'] not in existing_urls]
+            mod.upsert_to_supabase(articles)
+            all_new_urls += [a['article_url'] for a in new_articles if a.get('article_url')]
+            log.info(f'  VnEconomy: {len(articles)} bai trong 24h, {len(new_articles)} bai INSERT moi')
+        else:
+            log.warning('  VnEconomy: khong co bai nao')
+    except Exception as e:
+        log.error(f'  VnEconomy loi: {e}')
+
+    # VietnamFinance
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('vietnamfinance_scraper', CRAWLERS_DIR / 'vietnamfinance_scraper.py')
+        mod  = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        mod.LOOKBACK_DAYS = 1
+        mod.WORKERS       = 4
+
+        articles = mod.scrape_all()
+        if articles:
+            articles = mod.enrich_content(articles)
+            cutoff = datetime.now() - timedelta(hours=28)
+            articles = [a for a in articles if a.get('published_at') and datetime.fromisoformat(str(a['published_at'])) >= cutoff]
+            new_articles = [a for a in articles if a.get('article_url') and a['article_url'] not in existing_urls]
+            mod.upsert_to_supabase(articles)
+            all_new_urls += [a['article_url'] for a in new_articles if a.get('article_url')]
+            log.info(f'  VietnamFinance: {len(articles)} bai trong 24h, {len(new_articles)} bai INSERT moi')
+        else:
+            log.warning('  VietnamFinance: khong co bai nao')
+    except Exception as e:
+        log.error(f'  VietnamFinance loi: {e}')
+
     all_new_urls = [u for u in all_new_urls if u]
     log.info(f'  Tong bai INSERT moi: {len(all_new_urls)}')
     return all_new_urls

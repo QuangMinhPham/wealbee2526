@@ -43,13 +43,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Check for existing session on mount
   useEffect(() => {
-    // If URL has access_token hash (email confirmation callback), wait for SDK to process it
-    const hasAuthHash = window.location.hash.includes('access_token');
-    if (hasAuthHash) {
-      setIsLoading(true);
-    }
+    // Get initial session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        setUser(convertSupabaseUser(session.user));
+      }
+      setIsLoading(false);
+    });
 
-    // Listen for auth changes first — this catches email confirmation hash fragments
+    // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.user) {
         setUser(convertSupabaseUser(session.user));
@@ -65,19 +67,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(null);
       }
       setIsLoading(false);
-    });
-
-    // Also get initial session for cases where onAuthStateChange doesn't fire immediately
-    // But skip setIsLoading(false) here if we're waiting for hash to be processed by SDK
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        setUser(convertSupabaseUser(session.user));
-        setIsLoading(false);
-      } else if (!window.location.hash.includes('access_token')) {
-        // No session and no hash to process — safe to stop loading
-        setIsLoading(false);
-      }
-      // If there's a hash, keep isLoading=true until onAuthStateChange fires
     });
 
     return () => subscription.unsubscribe();
@@ -109,7 +98,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: `https://wealbee2526.vercel.app/app`,
+        redirectTo: `${window.location.origin}/app`,
       }
     });
 
@@ -127,7 +116,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'facebook',
       options: {
-        redirectTo: `https://wealbee2526.vercel.app/app`,
+        redirectTo: `${window.location.origin}/app`,
       }
     });
 
@@ -141,7 +130,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const register = async (email: string, password: string, name: string) => {
     setIsLoading(true);
-
+    
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
@@ -149,7 +138,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         data: {
           name,
         },
-        emailRedirectTo: `https://wealbee2526.vercel.app/app`,
+        emailRedirectTo: `${window.location.origin}/app`,
       }
     });
 
@@ -168,7 +157,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (data.user) {
       setUser(convertSupabaseUser(data.user));
     }
-
+    
     setIsLoading(false);
   };
 

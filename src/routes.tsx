@@ -11,16 +11,9 @@ import UnsubscribePage from "./pages/landing/UnsubscribePage";
 import BlogListPage from "./pages/landing/blog/BlogListPage";
 import BlogPostPage from "./pages/landing/blog/BlogPostPage";
 import { UserDashboard } from "./pages/user-dashboard";
-import { MarketsDashboard } from "./pages/markets-dashboard";
-import { StockDetail } from "./pages/stock-detail";
-import { DividendCalculator } from "./pages/dividend-calculator";
-import { Compare } from "./pages/compare";
-import { MyGoal } from "./pages/my-goal";
-import { InvestingGuides } from "./pages/investing-guides";
-import { TopStocks } from "./pages/top-stocks";
-import { DatabaseTest } from "./pages/database-test";
-import { PiAI } from "./pages/bee-ai";
-import { PortfolioNews } from "./pages/portfolio-news";
+import { IntelligenceFeed } from "./pages/intelligence-feed";
+import { ResearchDesk } from "./pages/research-desk";
+import { AdminDailyReview } from "./pages/admin-daily-review";
 import { NotFound } from "./pages/not-found";
 
 export const router = createBrowserRouter([
@@ -71,16 +64,9 @@ export const router = createBrowserRouter([
     ),
     children: [
       { index: true, Component: UserDashboard },
-      { path: "markets", Component: MarketsDashboard },
-      { path: "pi-ai", Component: PiAI },
-      { path: "stock/:ticker", Component: StockDetail },
-      { path: "portfolio-news", Component: PortfolioNews },
-      { path: "calculator", Component: DividendCalculator },
-      { path: "compare", Component: Compare },
-      { path: "my-goal", Component: MyGoal },
-      { path: "guides", Component: InvestingGuides },
-      { path: "top-stocks", Component: TopStocks },
-      { path: "database-test", Component: DatabaseTest },
+      { path: "feed", Component: IntelligenceFeed },
+      { path: "research", Component: ResearchDesk },
+      { path: "admin/daily-review", Component: AdminDailyReview },
     ],
   },
   // 404 Not Found
