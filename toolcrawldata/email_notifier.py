@@ -625,8 +625,8 @@ def build_email_html(email: str, holdings: list[dict], news_by_symbol: dict) -> 
 <body style="margin:0;padding:0;background:#F4F5F7;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#F4F5F7;padding:32px 0;">
   <tr>
-    <td align="center">
-      <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;">
+    <td align="center" style="padding:0 10%;">
+      <table width="100%" cellpadding="0" cellspacing="0" style="width:100%;">
 
         <!-- HEADER -->
         <tr>
