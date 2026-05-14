@@ -35,7 +35,6 @@ client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'), max_retries=1, timeout=30.0
 sb     = get_client()
 
 SYSTEM_PROMPT = """Bạn là chuyên gia phân tích tài chính Việt Nam, tư duy như fund manager kỳ cựu.
-
 ## BƯỚC 1 — LỌC BÀI RÁC
 Gán "trash": true nếu thuộc BẤT KỲ điều kiện nào:
 - Nội dung rỗng, quá ngắn, chỉ có link/file đính kèm
@@ -49,6 +48,7 @@ Gán "trash": true nếu thuộc BẤT KỲ điều kiện nào:
 - Tin quốc tế không có liên hệ rõ ràng đến Việt Nam
 Nếu "trash": true → trả về ngay với các trường còn lại = null.
 
+
 ## BƯỚC 2 — PHÂN LOẠI LOẠI TIN (news_type)
 Chọn đúng 1 nhãn:
 - "vi_mo": GDP, CPI, lãi suất NHNN, tỷ giá, xuất nhập khẩu, ngân sách nhà nước
@@ -58,11 +58,12 @@ Chọn đúng 1 nhãn:
 - "thi_truong": VN-Index, khối ngoại mua/bán ròng, margin, dòng tiền, ETF
 - "du_bao": khuyến nghị CTCK, target price, phân tích kỹ thuật
 
+
 ## BƯỚC 3 — MÃ CỔ PHIẾU BỊ ẢNH HƯỞNG (affected_symbols)
 Tối đa 5 mã viết hoa. Mảng rỗng [] nếu không xác định được.
 Chỉ gán mã khi CÓ THỂ diễn giải rõ cơ chế tác động cụ thể đến doanh thu/lợi nhuận/chi phí của DN đó trong reasoning.
 - Tin DN cụ thể: chỉ mã đó
-- Tin vĩ mô/ngành: chỉ gán mã nếu tin ảnh hưởng trực tiếp đến ngành/sản phẩm chính của DN (VD: lãi suất → ngân hàng, giá thép → HPG, tỷ giá → doanh nghiệp xuất khẩu lớn). KHÔNG gán blue-chip đại diện một cách chung chung. Nếu ảnh hưởng gián tiếp thì phải giải thích rõ cơ chế tác động trong phần reasoning, không chỉ gán mã đại diện.
+- Tin vĩ mô/ngành: chỉ gán mã nếu tin ảnh hưởng trực tiếp đến ngành/sản phẩm chính của DN (VD: lãi suất → ngân hàng, giá thép → HPG, tỷ giá → doanh nghiệp xuất khẩu lớn). KHÔNG gán blue-chip đại diện một cách chung chung. Nếu ảnh hưởng gián tiếp thì ở phải giải thích rõ cơ chế tác động trong phần reasoning, không chỉ gán mã đại diện.
 - Tin thị trường: chỉ gán mã nếu có cơ chế rõ ràng tại reasoning
 
 
@@ -75,12 +76,14 @@ Thang -10 đến +10, bước 0.5. Xét theo thứ tự:
 3. Tin đã được thị trường kỳ vọng trước? → giảm biên độ 40-60%
 4. Yếu tố đặc thù VN: biên độ cứng 7%/10%, retail panic, margin cascade (thép/BDS/CK), SOE discount 20%
 
+
 Ngưỡng nhãn:
 - score > +5.0  → label = "very_positive"
 - +1.5 < score ≤ +5.0 → label = "positive"
 - -1.5 ≤ score ≤ +1.5 → label = "neutral"
 - -5.0 ≤ score < -1.5 → label = "negative"
 - score < -5.0 → label = "very_negative"
+
 
 ## BƯỚC 5 — REASONING (bắt buộc)
 Nếu affected_symbols có ≥2 mã → dùng format phân theo symbol (KHÔNG dùng ngoặc vuông trong nội dung câu):
@@ -89,25 +92,32 @@ Nếu affected_symbols có ≥2 mã → dùng format phân theo symbol (KHÔNG d
 [SYMBOL2] Câu 1. Câu 2.
 (Viết cho đủ từng mã trong affected_symbols, không bỏ sót mã nào)
 
+
 Nếu affected_symbols có 0–1 mã → dùng format 2 câu:
 CÂU 1: [Sự kiện cụ thể] → [cơ chế tác động] → [chỉ số tài chính + ước lượng định lượng]
 CÂU 2: Bối cảnh DN hoặc hệ quả ngắn hạn cho nhà đầu tư.
+
 
 NGÔN NGỮ BẮT BUỘC:
 ✅ Dùng: thu hẹp, kéo giảm, gây áp lực, đẩy tăng, xói mòn, siết chặt, hỗ trợ, tạo dư địa
 ✅ Dùng số cụ thể: ~25bps, 8-12%, 1.200 tỷ đồng, NIM, CASA, EBITDA margin, biên GP
 ❌ Tuyệt đối không dùng: "có thể", "có lẽ", "đáng lo ngại", "cần theo dõi", "đáng kể", "nhìn chung"
 
+
 ## BƯỚC 6 — TÓM TẮT NỘI DUNG (content_summary)
-Viết 3-5 câu tóm tắt nội dung chính: sự kiện, số liệu quan trọng, bối cảnh liên quan.
-Ngắn gọn, súc tích, đủ để người đọc nắm nội dung mà không cần đọc bài gốc.
+Viết 3-5 bullet points tóm tắt nội dung chính: sự kiện, số liệu quan trọng, bối cảnh liên quan.
+Ưu tiên: doanh thu, lợi nhuận, biên lợi nhuận, tăng trưởng YoY/QoQ, backlog, sản lượng, thị phần, nợ vay, dòng tiền, CAPEX, đơn hàng, guidance.
+Mỗi bullet ngắn gọn, chứa số liệu cụ thể nếu có. Không viết nhận định hay suy diễn.
 Nếu trash: null.
 
+
 ## OUTPUT — JSON STRICT (không có text ngoài JSON)
+
 Nếu trash:
 {"trash":true,"news_type":null,"affected_symbols":null,"impact_score":null,"label":"trash","impact_reasoning":null,"content_summary":null}
-Nếu không trash:
-{"trash":false,"news_type":"hoat_dong_kd","affected_symbols":["VNM"],"impact_score":-3.5,"label":"negative","impact_reasoning":"Câu 1. Câu 2.","content_summary":"Tóm tắt 3-5 câu."}"""
+
+Nếu không trash (content_summary và impact_reasoning là JSON array of strings):
+{"trash":false,"news_type":"hoat_dong_kd","affected_symbols":["VNM"],"impact_score":-3.5,"label":"negative","content_summary":["Bullet 1 với số liệu cụ thể.","Bullet 2.","Bullet 3."],"impact_reasoning":["Câu phân tích tác động 1.","Câu phân tích tác động 2."]}"""
 
 VALID_LABELS = {'very_positive', 'positive', 'neutral', 'negative', 'very_negative', 'trash'}
 VALID_TYPES  = {'vi_mo', 'vi_mo_dn', 'hoat_dong_kd', 'phap_ly', 'thi_truong', 'du_bao'}
@@ -146,8 +156,10 @@ def _parse_response(data: dict, article_id: str) -> dict:
     label     = score_to_label(float(score)) if isinstance(score, (int, float)) else data.get('label', 'neutral')
     ntype     = data.get('news_type', 'thi_truong')
     affected  = data.get('affected_symbols') or []
-    reasoning = (data.get('impact_reasoning') or '').strip()
-    summary   = (data.get('content_summary') or '').strip()
+    _r = data.get('impact_reasoning') or ''
+    reasoning = '\n'.join(str(s).strip() for s in _r if s) if isinstance(_r, list) else str(_r).strip()
+    _s = data.get('content_summary') or ''
+    summary   = '\n'.join(str(s).strip() for s in _s if s) if isinstance(_s, list) else str(_s).strip()
 
     if label not in VALID_LABELS: label = 'neutral'
     if ntype not in VALID_TYPES:  ntype = 'thi_truong'
