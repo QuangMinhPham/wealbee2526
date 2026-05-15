@@ -146,6 +146,24 @@ def fetch_news_for_symbol(sb, symbol: str, since_published: str, since_labeled: 
 
 import re as _re
 
+
+def _md_bold(text: str) -> str:
+    """Convert **text** markdown bold → <strong> HTML."""
+    return _re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', text)
+
+
+def _render_bullets(text: str, color: str = '#374151', font_size: str = '12px') -> str:
+    """Render newline-separated bullet text as <ul><li> list with markdown bold support."""
+    lines = [l.strip() for l in (text or '').split('\n') if l.strip()]
+    if not lines:
+        return ''
+    items = ''.join(
+        f'<li style="margin-bottom:5px;color:{color};font-size:{font_size};line-height:1.6;">{_md_bold(l)}</li>'
+        for l in lines
+    )
+    return f'<ul style="margin:0 0 8px 0;padding-left:16px;">{items}</ul>'
+
+
 def _extract_reasoning_for_symbol(reasoning: str, symbol: str) -> str:
     """Với bài 1 symbol: extract [Chung] + [SYMBOL] nếu dùng format mới, fallback nguyên văn."""
     if not reasoning or not _re.search(r'\[[A-Z]{1,10}\]', reasoning):
@@ -165,7 +183,7 @@ def _reasoning_html_multi(reasoning: str, user_symbols: set) -> str:
     if not reasoning:
         return ''
     if not _re.search(r'\[[A-Z]{1,10}\]', reasoning):
-        return f'<p style="margin:0;color:#4A5568;font-size:12px;line-height:1.6;">{reasoning}</p>'
+        return _render_bullets(reasoning, color='#4A5568', font_size='12px') or f'<p style="margin:0;color:#4A5568;font-size:12px;line-height:1.6;">{_md_bold(reasoning)}</p>'
     parts = _re.split(r'\[([^\]]+)\]', reasoning)
     html  = []
     for i in range(1, len(parts), 2):
@@ -174,16 +192,16 @@ def _reasoning_html_multi(reasoning: str, user_symbols: set) -> str:
         if not text:
             continue
         if tag == 'Chung':
-            html.append(f'<p style="margin:0 0 8px;color:#4A5568;font-size:12px;line-height:1.6;">{text}</p>')
+            html.append(f'<p style="margin:0 0 8px;color:#4A5568;font-size:12px;line-height:1.6;">{_md_bold(text)}</p>')
         elif tag in user_symbols:
             html.append(
                 f'<p style="margin:0 0 6px;color:#4A5568;font-size:12px;line-height:1.6;">'
-                f'<span style="color:#0849AC;font-weight:700;font-style:italic;">[{tag}]</span> {text}</p>'
+                f'<span style="color:#0849AC;font-weight:700;font-style:italic;">[{tag}]</span> {_md_bold(text)}</p>'
             )
         else:
             html.append(
                 f'<p style="margin:0 0 6px;color:#9CA3AF;font-size:12px;line-height:1.6;">'
-                f'<span style="font-weight:600;">[{tag}]</span> {text}</p>'
+                f'<span style="font-weight:600;">[{tag}]</span> {_md_bold(text)}</p>'
             )
     return ''.join(html)
 
@@ -276,14 +294,17 @@ def _news_item_html(news: dict, symbol: str = '') -> str:
                           </a>
                         </div>"""
 
+    summary_html  = _render_bullets(summary, color='#374151', font_size='13px') if summary else ''
+    reasoning_html = _render_bullets(reasoning, color='#4A5568', font_size='12px') if reasoning else ''
+
     # Phần AI Reasoning (nếu có) hoặc placeholder — layout column
-    if reasoning:
+    if reasoning_html:
         bottom_block = f"""
                   <table width="100%" cellpadding="0" cellspacing="0" style="background:#ECF2FF;border-radius:8px;">
                     <tr>
                       <td style="padding:12px 14px;">
                         <p style="margin:0 0 5px;color:#0849AC;font-size:11px;font-weight:700;letter-spacing:0.5px;">AI REASONING</p>
-                        <p style="margin:0;color:#4A5568;font-size:12px;line-height:1.6;">{reasoning}</p>
+                        {reasoning_html}
                         {chatgpt_btn}
                       </td>
                     </tr>
@@ -301,10 +322,10 @@ def _news_item_html(news: dict, symbol: str = '') -> str:
 
     return f"""
         <tr>
-          <td style="background:#ffffff;padding:8px 32px;">
+          <td class="pw" style="background:#ffffff;padding:8px 32px;">
             <table width="100%" cellpadding="0" cellspacing="0">
               <tr>
-                <td style="background:#F8F9FB;border-radius:10px;border-left:4px solid {border};padding:16px;">
+                <td class="card" style="background:#F8F9FB;border-radius:10px;border-left:4px solid {border};padding:16px;">
                   <table cellpadding="0" cellspacing="0" style="margin-bottom:10px;">
                     <tr>
                       <td style="background:{bg};color:{color};font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;">{badge}</td>
@@ -313,7 +334,7 @@ def _news_item_html(news: dict, symbol: str = '') -> str:
                     </tr>
                   </table>
                   <a href="{url}" style="color:#030213;font-size:14px;font-weight:600;text-decoration:none;line-height:1.5;display:block;margin-bottom:8px;">{title}</a>
-                  <p style="margin:0 0 6px;color:#717182;font-size:13px;line-height:1.55;">{summary}</p>
+                  {summary_html if summary_html else f'<p style="margin:0 0 6px;color:#717182;font-size:13px;line-height:1.55;">{summary}</p>' if summary else ''}
                   {read_html}
                   {bottom_block}
                 </td>
@@ -364,8 +385,9 @@ def _multi_news_item_html(news: dict, user_symbols: set) -> str:
     else:
         read_html = f'<p style="margin:0 0 12px;"><a href="{url}" style="color:#0849AC;font-size:12px;font-weight:600;text-decoration:none;">Đọc bài báo gốc →</a></p>'
 
-    chips_html    = _affected_chips_html(affected, user_symbols)
+    chips_html     = _affected_chips_html(affected, user_symbols)
     reasoning_html = _reasoning_html_multi(reasoning_raw, user_symbols)
+    summary_html   = _render_bullets(summary, color='#374151', font_size='13px') if summary else ''
 
     user_syms_affected = ', '.join(s for s in affected if s in user_symbols)
     deep_prompt = (
@@ -410,10 +432,10 @@ def _multi_news_item_html(news: dict, user_symbols: set) -> str:
 
     return f"""
         <tr>
-          <td style="background:#ffffff;padding:8px 32px;">
+          <td class="pw" style="background:#ffffff;padding:8px 32px;">
             <table width="100%" cellpadding="0" cellspacing="0">
               <tr>
-                <td style="background:#F8F9FB;border-radius:10px;border-left:4px solid {border};padding:16px;">
+                <td class="card" style="background:#F8F9FB;border-radius:10px;border-left:4px solid {border};padding:16px;">
                   <table cellpadding="0" cellspacing="0" style="margin-bottom:10px;">
                     <tr>
                       <td style="background:{bg};color:{color};font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;">{badge}</td>
@@ -423,7 +445,7 @@ def _multi_news_item_html(news: dict, user_symbols: set) -> str:
                   </table>
                   <a href="{url}" style="color:#030213;font-size:14px;font-weight:600;text-decoration:none;line-height:1.5;display:block;margin-bottom:8px;">{title}</a>
                   <div style="margin-bottom:8px;">{chips_html}</div>
-                  <p style="margin:0 0 6px;color:#717182;font-size:13px;line-height:1.55;">{summary}</p>
+                  {summary_html if summary_html else f'<p style="margin:0 0 6px;color:#717182;font-size:13px;line-height:1.55;">{summary}</p>' if summary else ''}
                   {read_html}
                   {bottom_block}
                 </td>
@@ -510,7 +532,7 @@ def build_email_html(email: str, holdings: list[dict], news_by_symbol: dict) -> 
 
     portfolio_summary_block = f"""
         <tr>
-          <td style="background:#ffffff;padding:16px 32px 4px;">
+          <td class="pw" style="background:#ffffff;padding:16px 32px 4px;">
             <p style="margin:0 0 12px;color:#030213;font-size:12px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;">Danh mục hôm nay</p>
             <table width="100%" cellpadding="0" cellspacing="0">
               {with_news_html}
@@ -519,7 +541,7 @@ def build_email_html(email: str, holdings: list[dict], news_by_symbol: dict) -> 
           </td>
         </tr>
         <tr>
-          <td style="background:#ffffff;padding:0 32px 16px;">
+          <td class="pw" style="background:#ffffff;padding:0 32px 16px;">
             <div style="border-top:1px solid #ECECF0;"></div>
           </td>
         </tr>"""
@@ -547,7 +569,7 @@ def build_email_html(email: str, holdings: list[dict], news_by_symbol: dict) -> 
         multi_rows = ''.join(_multi_news_item_html(n, user_symbols_set) for n in multi_articles)
         multi_block = f"""
         <tr>
-          <td style="background:#ffffff;padding:20px 32px 8px;">
+          <td class="pw" style="background:#ffffff;padding:20px 32px 8px;">
             <table width="100%" cellpadding="0" cellspacing="0">
               <tr>
                 <td>
@@ -559,7 +581,7 @@ def build_email_html(email: str, holdings: list[dict], news_by_symbol: dict) -> 
         </tr>
         {multi_rows}
         <tr>
-          <td style="background:#ffffff;padding:0 32px 16px;">
+          <td class="pw" style="background:#ffffff;padding:0 32px 16px;">
             <div style="border-top:1px solid #ECECF0;"></div>
           </td>
         </tr>"""
@@ -575,7 +597,7 @@ def build_email_html(email: str, holdings: list[dict], news_by_symbol: dict) -> 
         news_rows = ''.join(_news_item_html(n, symbol) for n in news_list)
         per_symbol_blocks += f"""
         <tr>
-          <td style="background:#ffffff;padding:20px 32px 8px;">
+          <td class="pw" style="background:#ffffff;padding:20px 32px 8px;">
             <table width="100%" cellpadding="0" cellspacing="0">
               <tr>
                 <td>
@@ -588,7 +610,7 @@ def build_email_html(email: str, holdings: list[dict], news_by_symbol: dict) -> 
         </tr>
         {news_rows}
         <tr>
-          <td style="background:#ffffff;padding:0 32px 16px;">
+          <td class="pw" style="background:#ffffff;padding:0 32px 16px;">
             <div style="border-top:1px solid #ECECF0;"></div>
           </td>
         </tr>"""
@@ -600,7 +622,7 @@ def build_email_html(email: str, holdings: list[dict], news_by_symbol: dict) -> 
         symbol_list = ' · '.join(f'<strong>{s}</strong>' for s in symbols_without_news) if symbols_without_news else 'các cổ phiếu trong danh mục'
         holding_blocks = f"""
         <tr>
-          <td style="background:#ffffff;padding:8px 32px 24px;">
+          <td class="pw" style="background:#ffffff;padding:8px 32px 24px;">
             <table width="100%" cellpadding="0" cellspacing="0">
               <tr>
                 <td style="background:#F8F9FB;border-radius:10px;border-left:4px solid #E5E7EB;padding:20px 18px;">
@@ -621,11 +643,17 @@ def build_email_html(email: str, holdings: list[dict], news_by_symbol: dict) -> 
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
   <title>Wealbee - Bản tin {buoi}</title>
+  <style>
+    @media only screen and (max-width:600px){{
+      .pw  {{ padding-left:10px!important; padding-right:10px!important; }}
+      .card{{ padding:10px!important; }}
+    }}
+  </style>
 </head>
 <body style="margin:0;padding:0;background:#F4F5F7;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#F4F5F7;padding:32px 0;">
   <tr>
-    <td align="center" style="padding:0 10%;">
+    <td align="center">
       <table width="100%" cellpadding="0" cellspacing="0" style="width:100%;">
 
         <!-- HEADER -->
@@ -664,14 +692,14 @@ def build_email_html(email: str, holdings: list[dict], news_by_symbol: dict) -> 
 
         <!-- GREETING -->
         <tr>
-          <td style="background:#ffffff;padding:24px 32px 12px;">
+          <td class="pw" style="background:#ffffff;padding:24px 32px 12px;">
             <p style="margin:0;color:#030213;font-size:15px;line-height:1.6;">
               Dưới đây là những tin tức quan trọng ảnh hưởng đến danh mục của bạn hôm nay.
             </p>
           </td>
         </tr>
         <tr>
-          <td style="background:#ffffff;padding:0 32px;">
+          <td class="pw" style="background:#ffffff;padding:0 32px;">
             <div style="border-top:1px solid #ECECF0;"></div>
           </td>
         </tr>

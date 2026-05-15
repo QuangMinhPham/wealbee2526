@@ -404,6 +404,8 @@ Chỉ gán mã khi CÓ THỂ diễn giải rõ cơ chế tác động cụ thể
 - Tin thị trường: chỉ gán mã nếu có cơ chế rõ ràng tại reasoning
 
 
+
+
 ## BƯỚC 4 — CHẤM ĐIỂM TÁC ĐỘNG (impact_score)
 Thang -10 đến +10, bước 0.5. Xét theo thứ tự:
 1. Tin ảnh hưởng trực tiếp hay gián tiếp đến doanh thu/lợi nhuận DN?
@@ -442,19 +444,54 @@ NGÔN NGỮ BẮT BUỘC:
 
 
 ## BƯỚC 6 — TÓM TẮT NỘI DUNG (content_summary)
-Viết 3-5 bullet points tóm tắt nội dung chính: sự kiện, số liệu quan trọng, bối cảnh liên quan.
-Ưu tiên: doanh thu, lợi nhuận, biên lợi nhuận, tăng trưởng YoY/QoQ, backlog, sản lượng, thị phần, nợ vay, dòng tiền, CAPEX, đơn hàng, guidance.
-Mỗi bullet ngắn gọn, chứa số liệu cụ thể nếu có. Không viết nhận định hay suy diễn.
+Viết 3-5 câu tóm tắt nội dung chính: sự kiện, số liệu quan trọng, bối cảnh liên quan.
+Ngắn gọn, súc tích, đủ để người đọc nắm nội dung mà không cần đọc bài gốc.
 Nếu trash: null.
 
 
 ## OUTPUT — JSON STRICT (không có text ngoài JSON)
 
-Nếu trash:
-{"trash":true,"news_type":null,"affected_symbols":null,"impact_score":null,"label":"trash","impact_reasoning":null,"content_summary":null}
 
-Nếu không trash (content_summary và impact_reasoning là JSON array of strings):
-{"trash":false,"news_type":"hoat_dong_kd","affected_symbols":["VNM"],"impact_score":-3.5,"label":"negative","content_summary":["Bullet 1 với số liệu cụ thể.","Bullet 2.","Bullet 3."],"impact_reasoning":["Câu phân tích tác động 1.","Câu phân tích tác động 2."]}"""
+Nếu trash:
+{
+  "trash": true,
+  "news_type": null,
+  "affected_symbols": null,
+  "impact_score": null,
+  "label": "trash",
+  "impact_reasoning": null,
+  "content_summary": null
+}
+
+
+Nếu không trash:
+{
+  "trash": false,
+  "news_type": "hoat_dong_kd",
+  "affected_symbols": ["VNM"],
+  "impact_score": -3.5,
+  "label": "negative",
+
+
+  "content_summary": [
+    "Chỉ tóm tắt metric và dữ kiện quan trọng nhất.",
+    "Ưu tiên: doanh thu, lợi nhuận, biên lợi nhuận, tăng trưởng, backlog, nợ vay.",
+    "Trung bình 3 bullet points, tối đa 5 bullet points.",
+    "Mỗi bullet dưới 15 từ, ngắn gọn, trực tiếp.",
+    "Bắt buộc chứa số liệu cụ thể nếu bài báo đề cập.",
+    "Tô đậm bằng markdown các số liệu và yếu tố quan trọng.",
+    "Không đưa nhận định hay suy diễn."
+  ],
+
+
+  "impact_reasoning": [
+    "Phân tích metric tác động đến **doanh thu**, **lợi nhuận**, **tăng trưởng**, **rủi ro**.",
+    "Giải thích logic tác động từ từng metric quan trọng.",
+    "Mỗi bullet dưới 15 từ, tập trung góc nhìn nhà đầu tư.",
+    "Tô đậm bằng markdown các số liệu và yếu tố bị tác động.",
+    "Không tóm tắt lại nội dung bài báo."
+  ]
+}"""
 
         VALID_LABELS = {'very_positive', 'positive', 'neutral', 'negative', 'very_negative', 'trash'}
         VALID_TYPES  = {'vi_mo', 'vi_mo_dn', 'hoat_dong_kd', 'phap_ly', 'thi_truong', 'du_bao'}
